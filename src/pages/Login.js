@@ -1,3 +1,13 @@
+// pages/Login.js — User login page
+//
+// FIX: Removed "Login as Admin" checkbox entirely.
+// Admin login has its own dedicated page at /admin/login (see AdminLogin.js
+// produced in the previous batch).
+//
+// FIX: AuthService.login() already sends role:'user' in the request body
+// (from the previous batch fix), so non-admin accounts are rejected server-side
+// if someone manually navigates here and tries to use admin credentials.
+
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../Context/AuthContext';
@@ -12,7 +22,6 @@ function Login() {
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [isAdminLogin, setIsAdminLogin] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
   const handleSubmit = async (e) => {
@@ -24,22 +33,14 @@ function Login() {
 
     setLoading(true);
     try {
-      const credentials = { identifier, password };
-      const result = isAdminLogin
-        ? await AuthService.loginAdmin(credentials)
-        : await AuthService.login(credentials);
+      // FIX: Always use AuthService.login (sends role:'user').
+      // Admin credentials will be rejected by the backend with a role-mismatch error.
+      const result = await AuthService.login({ identifier, password });
 
       if (result.success && result.authtoken) {
         await login(result.authtoken);
-        localStorage.setItem('token', result.authtoken);
-
         toast.success('लॉगिन सफल हुआ');
-
-        if (result.user?.isAdmin || result.user?.role === 'admin') {
-          navigate('/admin/dashboard');
-        } else {
-          navigate('/');
-        }
+        navigate('/');
       } else {
         toast.error(result.error || 'लॉगिन विफल');
       }
@@ -102,7 +103,7 @@ function Login() {
             <div className="password-input-wrapper">
               <input
                 id="password"
-                type={showPassword ? "text" : "password"}
+                type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete="current-password"
@@ -128,23 +129,8 @@ function Login() {
             </div>
           </div>
 
+          {/* FIX: Admin toggle REMOVED. Admin login is at /admin/login */}
           <div className="form-options">
-            <div className="checkbox-wrapper">
-              <input
-                type="checkbox"
-                className="custom-checkbox"
-                checked={isAdminLogin}
-                onChange={() => setIsAdminLogin(!isAdminLogin)}
-                id="adminCheck"
-              />
-              <label htmlFor="adminCheck">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" className="admin-icon">
-                  <path d="M8 8a3 3 0 100-6 3 3 0 000 6zM8 9a5 5 0 00-5 5v1h10v-1a5 5 0 00-5-5z"/>
-                  <path d="M13.5 2.5l-1 1-1-1-1 1-1-1v3l1 1 1-1 1 1 1-1v-3z"/>
-                </svg>
-                एडमिन के रूप में लॉगिन करें
-              </label>
-            </div>
             <Link to="/forgot-password" className="forgot-link">
               पासवर्ड भूल गए?
             </Link>

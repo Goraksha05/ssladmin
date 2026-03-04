@@ -1,114 +1,120 @@
-import React, { useEffect, useState } from 'react';
+// App.js
+//
+// FIX: Removed the pre-AuthProvider localStorage read that derived `isAdmin`
+// before AuthProvider mounted. That read is always stale on hard refresh
+// because it ran synchronously before any auth restore could happen, causing
+// admin users to be routed to /login and regular users to see /admin routes.
+//
+// Auth-aware routing now lives inside PrivateRoot (which is a child of
+// AuthProvider and therefore reads live context state).
+
+import React, { Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { AuthProvider } from './Context/AuthContext';
+import { AuthProvider, useAuth } from './Context/AuthContext';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Home from './pages/Home';
-import AdminRoute from './Components/AdminRoute/AdminRoute';
 import AdminLayout from './Components/AdminLayout';
 import AdminDashboard from './Components/AdminDashboard';
 import AdminUserReport from './Components/UserReport';
+import { I18nThemeProvider } from "./Context/I18nThemeContext";
 
 const queryClient = new QueryClient();
 
-function App() {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    // Check authentication status
-    const token = localStorage.getItem("token");
-    const storedUser = localStorage.getItem("User");
-    
-    if (token && storedUser) {
-      try {
-        const parsedUser = JSON.parse(storedUser);
-        setUser(parsedUser);
-      } catch (err) {
-        console.error("Failed to parse user data:", err);
-        localStorage.removeItem("User");
-        localStorage.removeItem("token");
-      }
-    }
-    
-    setLoading(false);
-  }, []);
-
-  if (loading) {
-    return (
+// ── Full-screen loading spinner ───────────────────────────────────────────────
+function PageLoader() {
+  return (
+    <div style={{
+      display: 'flex',
+      justifyContent: 'center',
+      alignItems: 'center',
+      height: '100vh',
+      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+    }}>
       <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        height: '100vh',
-        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
-      }}>
-        <div style={{
-          width: '60px',
-          height: '60px',
-          border: '4px solid rgba(255,255,255,0.3)',
-          borderTop: '4px solid white',
-          borderRadius: '50%',
-          animation: 'spin 1s linear infinite'
-        }} />
-      </div>
-    );
-  }
+        width: '60px',
+        height: '60px',
+        border: '4px solid rgba(255,255,255,0.3)',
+        borderTop: '4px solid white',
+        borderRadius: '50%',
+        animation: 'spin 1s linear infinite'
+      }} />
+    </div>
+  );
+}
 
-  const isAuthenticated = !!user;
-  const isAdmin = user?.isAdmin || user?.role === 'admin';
+// ── Route guard components ────────────────────────────────────────────────────
 
-  console.log("🔐 Auth state:", { isAuthenticated, isAdmin, user });
+/**
+ * Redirects already-authenticated users away from public pages (login/register).
+ * Admins go to /admin/dashboard, regular users go to /.
+ */
+function PublicOnlyRoute({ children }) {
+  const { isAuthenticated, user } = useAuth();
+  if (!isAuthenticated) return children;
+  return <Navigate to={user?.isAdmin ? '/admin/dashboard' : '/'} replace />;
+}
 
+/**
+ * Requires authentication. Redirects to /login if not authenticated.
+ */
+function PrivateRoute({ children }) {
+  const { isAuthenticated } = useAuth();
+  return isAuthenticated ? children : <Navigate to="/login" replace />;
+}
+
+/**
+ * Requires admin role. Redirects non-admins to /admin/login, unauthenticated
+ * users to /login.
+ */
+function AdminRoute({ children }) {
+  const { isAuthenticated, user } = useAuth();
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (!user?.isAdmin) return <Navigate to="/login" replace />;
+  return children;
+}
+
+// ── Root routes (must be inside AuthProvider) ─────────────────────────────────
+function AppRoutes() {
+  return (
+    <Routes>
+      {/* Public */}
+      <Route path="/login" element={<PublicOnlyRoute><Login /></PublicOnlyRoute>} />
+      <Route path="/register" element={<PublicOnlyRoute><Register /></PublicOnlyRoute>} />
+
+      {/* User home */}
+      <Route path="/" element={<PrivateRoute><Home /></PrivateRoute>} />
+
+      {/* Admin — nested under AdminLayout */}
+      <Route
+        path="/admin"
+        element={<AdminRoute><AdminLayout /></AdminRoute>}
+      >
+        <Route index element={<Navigate to="dashboard" replace />} />
+        <Route path="dashboard" element={<AdminDashboard />} />
+        <Route path="users" element={<AdminUserReport />} />
+        <Route path="*" element={<Navigate to="dashboard" replace />} />
+      </Route>
+
+      {/* Fallback */}
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
+}
+
+function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <Router>
-          <Routes>
-            {/* Public Routes */}
-            <Route 
-              path="/login" 
-              element={isAuthenticated ? <Navigate to={isAdmin ? "/admin/dashboard" : "/"} replace /> : <Login />} 
-            />
-            <Route 
-              path="/register" 
-              element={isAuthenticated ? <Navigate to={isAdmin ? "/admin/dashboard" : "/"} replace /> : <Register />} 
-            />
-
-            {/* Admin Routes */}
-            {isAdmin ? (
-              <>
-                <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
-                <Route
-                  path="/admin/*"
-                  element={
-                    <AdminRoute>
-                      <AdminLayout />
-                    </AdminRoute>
-                  }
-                >
-                  <Route path="dashboard" element={<AdminDashboard />} />
-                  <Route path="users" element={<AdminUserReport />} />
-                  <Route path="*" element={<Navigate to="/admin/dashboard" replace />} />
-                </Route>
-                <Route path="/" element={<Navigate to="/admin/dashboard" replace />} />
-                <Route path="*" element={<Navigate to="/admin/dashboard" replace />} />
-              </>
-            ) : (
-              <>
-                {/* Regular User Routes */}
-                <Route 
-                  path="/" 
-                  element={isAuthenticated ? <Home /> : <Navigate to="/login" replace />} 
-                />
-                <Route path="/admin/*" element={<Navigate to="/login" replace />} />
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </>
-            )}
-          </Routes>
-        </Router>
-      </AuthProvider>
+      <I18nThemeProvider>
+        <AuthProvider>
+          <Router>
+            <Suspense fallback={<PageLoader />}>
+              <AppRoutes />
+            </Suspense>
+          </Router>
+        </AuthProvider>
+      </I18nThemeProvider>
     </QueryClientProvider>
   );
 }

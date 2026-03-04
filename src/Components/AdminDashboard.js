@@ -6,12 +6,13 @@ import AdminRewardDashboard from "./AdminRewardDashboard";
 import AdminRewardUndoPanel from "./AdminRewardUndoPanel";
 import ClaimDashboard from "./ClaimDashboard";
 import AdminUserReport from "./UserReport";
+import { I18nThemeProvider } from "../Context/I18nThemeContext";
 
 const AdminDashboard = () => {
   const [activeTab, setActiveTab] = useState("rewards");
 
   return (
-    <>
+    <I18nThemeProvider>
       <div className="admin-dashboard-wrapper">
         {/* Tab Navigation */}
         <div className="tab-navigation">
@@ -117,7 +118,7 @@ const AdminDashboard = () => {
           }
         }
       `}</style>
-    </>
+    </I18nThemeProvider>
   );
 };
 
