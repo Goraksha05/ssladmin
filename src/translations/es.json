@@ -158,5 +158,6 @@
   "strength1": "Débil",
   "strength2": "Regular",
   "strength3": "Fuerte",
-  "strength4": "Muy fuerte"
+  "strength4": "Muy fuerte",
+  "logout": "Cerrar sesión"
 }

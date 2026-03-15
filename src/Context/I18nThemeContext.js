@@ -4,7 +4,7 @@ import React, { createContext, useContext, useState, useEffect, useMemo } from "
 
 // Translation files
 import en from "../translations/en.json";
-import hi from "../translations/hi.json";
+import hi from ".././translations/hi.json";
 import mr from "../translations/mr.json";
 import kn from "../translations/kn.json";
 import ta from "../translations/ta.json";

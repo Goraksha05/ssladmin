@@ -158,5 +158,6 @@
   "strength1": "弱",
   "strength2": "一般",
   "strength3": "强",
-  "strength4": "非常强"
+  "strength4": "非常强",
+  "logout": "退出登录"
 }

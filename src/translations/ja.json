@@ -158,5 +158,6 @@
   "strength1": "弱い",
   "strength2": "普通",
   "strength3": "強い",
-  "strength4": "非常に強い"
+  "strength4": "非常に強い",
+  "logout": "ログアウト"
 }

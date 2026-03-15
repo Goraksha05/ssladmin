@@ -158,5 +158,6 @@
   "strength1": "Faible",
   "strength2": "Moyen",
   "strength3": "Fort",
-  "strength4": "Très fort"
+  "strength4": "Très fort",
+  "logout": "Déconnexion"
 }

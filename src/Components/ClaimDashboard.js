@@ -1,13 +1,11 @@
 import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import axios from "axios";
+import apiRequest from "../utils/apiRequest"
 
 const fetchClaims = async () => {
-  const token = localStorage.getItem("token");
-  const { data } = await axios.get("/api/admin/reward-claims", {
-    headers: { Authorization: `Bearer ${token}` }
-  });
-  return data;
+  const { data } = await apiRequest.get("/api/admin/reward-claims");
+  return data ?? [];
 };
 
 const ClaimDashboard = () => {

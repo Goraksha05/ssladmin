@@ -158,5 +158,6 @@
   "strength1": "Schwach",
   "strength2": "Mittel",
   "strength3": "Stark",
-  "strength4": "Sehr stark"
+  "strength4": "Sehr stark",
+  "logout": "Abmelden"
 }
