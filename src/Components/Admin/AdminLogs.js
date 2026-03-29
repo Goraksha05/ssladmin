@@ -97,7 +97,7 @@ const AdminLogs = () => {
   }, [actionFilter, dateFrom, dateTo]);
 
   useEffect(() => { setPage(1); }, [actionFilter, dateFrom, dateTo]);
-  useEffect(() => { fetchLogs(page); }, [page, actionFilter, dateFrom, dateTo]);
+  useEffect(() => { fetchLogs(page); }, [page, actionFilter, dateFrom, dateTo, fetchLogs]);
 
   const columns = [
     {

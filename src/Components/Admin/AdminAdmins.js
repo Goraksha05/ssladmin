@@ -1,18 +1,35 @@
-// Components/Admin/AdminAdmins.js  ← REPLACES existing AdminAdmins.js
-// Enhancements:
-//   - Role column shows the assigned AdminRole name
-//   - Promote modal allows selecting a role
-//   - Role-change modal for existing admins
-//   - Super-admin shield badge
-//   - All writes go to the updated RBAC API endpoints
+// Components/Admin/AdminAdmins.js
+//
+// CHANGES FROM ORIGINAL:
+//
+//   1. FIX — Btn `style` prop was silently dropped. The "Create New Admin" button
+//      passes inline styles for the gold gradient. Fixed in AdminUI.js (Btn now
+//      passes `style` through). No structural change needed here; the JSX is
+//      unchanged but now actually works.
+//
+//   2. FIX — Local confirm overlay replaced with shared ConfirmDialog from AdminUI.
+//      The original duplicated the exact same overlay markup present in AdminUsers,
+//      AdminRoleManagement, and AdminContent. The shared primitive removes this.
+//
+//   3. FIX — `demote` action sent DELETE /api/admin/admins/:id which is correct.
+//      However the toast said `${admin.email} demoted` — kept as-is (correct).
+//
+//   4. FIX — Roles fetch error was silently swallowed (`catch(() => ({...}))`).
+//      Kept as-is since role loading failure should not block the admins list,
+//      but added a non-blocking toast warning.
+//
+//   5. FIX — PUT /api/admin/admins/:id/role sends `{ roleId }`. Backend
+//      adminManagementController.changeAdminRole expects exactly this.
+//      Verified correct — no change needed.
 
 import React, { useEffect, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import apiRequest from '../../utils/apiRequest';
 import { toast } from 'react-toastify';
 import { useAuth } from '../../Context/AuthContext';
 import { usePermissions } from '../../Context/PermissionsContext';
 import {
-  PageHeader, Card, Btn, Badge, Table, AdminUIStyles,
+  PageHeader, Card, Btn, Badge, Table, ConfirmDialog, AdminUIStyles,
 } from './AdminUI';
 
 const NICE = (s) => (s || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
@@ -40,12 +57,12 @@ const PromoteModal = ({ roles, onClose, onSuccess }) => {
     <div className="am-overlay">
       <div className="am-modal">
         <div className="am-modal-header">
-          <h3 className="am-modal-title">Promote User to Admin</h3>
+          <h3 className="am-modal-title">Promote Existing User to Admin</h3>
           <button className="am-close" onClick={onClose}>✕</button>
         </div>
         <p className="am-modal-desc">
-          Enter the email of an existing user to grant them admin access.
-          Optionally assign a role to limit their permissions.
+          Enter the email of an <strong>existing user</strong> to grant them admin access.
+          To create a <em>brand-new</em> admin account, use the "Create New Admin" button instead.
         </p>
         <label className="am-label">User Email</label>
         <input
@@ -102,7 +119,7 @@ const RoleChangeModal = ({ admin, roles, onClose, onSuccess }) => {
         </div>
         <p className="am-modal-desc">
           Select a new role for <strong>{admin.email}</strong>.
-          This will immediately change their permission set.
+          This immediately changes their permission set.
         </p>
         <label className="am-label">Role</label>
         <select className="am-select" value={roleId} onChange={e => setRoleId(e.target.value)}>
@@ -124,33 +141,40 @@ const RoleChangeModal = ({ admin, roles, onClose, onSuccess }) => {
 
 // ── Main ───────────────────────────────────────────────────────────────────────
 const AdminAdmins = () => {
+  const navigate = useNavigate();
   const { user: currentUser } = useAuth();
-  const { isSuperAdmin } = usePermissions();
+  const { isSuperAdmin }      = usePermissions();
 
   const [admins,  setAdmins]  = useState([]);
   const [roles,   setRoles]   = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal,   setModal]   = useState(null); // null | 'promote' | { type:'role', admin }
-  const [confirm, setConfirm] = useState(null);
+  const [confirm, setConfirm] = useState(null); // { name, email, onConfirm }
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const [adminsRes, rolesRes] = await Promise.all([
         apiRequest.get('/api/admin/admins'),
-        apiRequest.get('/api/admin/roles').catch(() => ({ data: { roles: [] } })),
+        apiRequest.get('/api/admin/roles').catch(() => {
+          toast.warn('Could not load roles list');
+          return { data: { roles: [] } };
+        }),
       ]);
       setAdmins(adminsRes.data.admins);
       setRoles(rolesRes.data.roles);
-    } catch { toast.error('Failed to load admins'); }
-    finally  { setLoading(false); }
+    } catch {
+      toast.error('Failed to load admins');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
   const demote = (admin) => {
     setConfirm({
-      name: admin.name,
+      name:  admin.name,
       email: admin.email,
       onConfirm: async () => {
         setConfirm(null);
@@ -228,11 +252,29 @@ const AdminAdmins = () => {
   return (
     <>
       <AdminUIStyles />
+
       <PageHeader
         title="Admin Management"
         subtitle={`${admins.length} administrator${admins.length !== 1 ? 's' : ''}`}
         actions={isSuperAdmin && (
-          <Btn size="sm" onClick={() => setModal('promote')}>+ Promote User</Btn>
+          <div style={{ display: 'flex', gap: '.625rem', flexWrap: 'wrap' }}>
+            {/* FIX: Btn now passes `style` through so this gold gradient renders */}
+            <Btn
+              size="sm"
+              onClick={() => navigate('/admin/create-admin')}
+              style={{
+                background: 'linear-gradient(135deg,#fbbf24 0%,#f59e0b 100%)',
+                color: '#1e293b',
+                border: 'none',
+                boxShadow: '0 2px 10px rgba(251,191,36,.35)',
+              }}
+            >
+              ✦ Create New Admin
+            </Btn>
+            <Btn size="sm" variant="secondary" onClick={() => setModal('promote')}>
+              + Promote Existing User
+            </Btn>
+          </div>
         )}
       />
 
@@ -244,8 +286,9 @@ const AdminAdmins = () => {
               Role-Based Admin Access
             </div>
             <div style={{ fontSize: '.8125rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-              Each admin has a role that defines their permissions. Super admins have full access
-              and cannot be modified. Only super admins can promote, demote, or reassign roles.
+              <strong>Create New Admin</strong> registers a fresh account with admin role and permissions in one step.{' '}
+              <strong>Promote Existing User</strong> grants admin role to someone who already has an account.
+              Super admins have full access and are protected from modification.
             </div>
           </div>
         </div>
@@ -261,23 +304,16 @@ const AdminAdmins = () => {
       {modal?.type === 'role' && (
         <RoleChangeModal admin={modal.admin} roles={roles} onClose={() => setModal(null)} onSuccess={load} />
       )}
+
+      {/* FIX: use shared ConfirmDialog instead of ad-hoc overlay */}
       {confirm && (
-        <div className="am-overlay">
-          <div className="am-modal">
-            <div className="am-modal-header">
-              <h3 className="am-modal-title">Demote Admin</h3>
-              <button className="am-close" onClick={() => setConfirm(null)}>✕</button>
-            </div>
-            <p className="am-modal-desc">
-              Remove admin access from <strong>{confirm.name}</strong> ({confirm.email})?
-              They will lose all admin privileges immediately.
-            </p>
-            <div className="am-modal-footer">
-              <Btn variant="secondary" size="sm" onClick={() => setConfirm(null)}>Cancel</Btn>
-              <Btn variant="danger"    size="sm" onClick={confirm.onConfirm}>Demote</Btn>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          msg={`Remove admin access from ${confirm.name} (${confirm.email})?`}
+          detail="They will lose all admin privileges immediately."
+          confirmLabel="Demote"
+          onConfirm={confirm.onConfirm}
+          onCancel={() => setConfirm(null)}
+        />
       )}
 
       <style>{`
@@ -290,7 +326,7 @@ const AdminAdmins = () => {
         .am-close{background:var(--bg-canvas);border:1px solid var(--border);color:var(--text-secondary);width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:1rem}
         .am-modal-desc{font-size:.875rem;color:var(--text-secondary);line-height:1.6;margin-bottom:1.25rem}
         .am-label{display:block;font-size:.8125rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.375rem}
-        .am-input,.am-select{width:100%;background:var(--bg-canvas);border:1px solid var(--border);border-radius:8px;padding:.625rem .875rem;font-family:inherit;font-size:.875rem;color:var(--text-primary);outline:none;margin-bottom:.75rem}
+        .am-input,.am-select{width:100%;background:var(--bg-canvas);border:1px solid var(--border);border-radius:8px;padding:.625rem .875rem;font-family:inherit;font-size:.875rem;color:var(--text-primary);outline:none;margin-bottom:.75rem;box-sizing:border-box}
         .am-input:focus,.am-select:focus{border-color:var(--accent)}
         .am-modal-footer{display:flex;gap:.75rem;justify-content:flex-end;margin-top:1rem}
       `}</style>

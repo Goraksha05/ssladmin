@@ -105,7 +105,7 @@ const AdminFinancial = () => {
 
   useEffect(() => { fetchAnalytics(); }, [fetchAnalytics]);
   useEffect(() => { setPage(1); }, [plan, hasBankDetails, dateFrom, dateTo]);
-  useEffect(() => { fetchRecords(page); }, [page, plan, hasBankDetails, dateFrom, dateTo]);
+  useEffect(() => { fetchRecords(page); }, [page, plan, hasBankDetails, dateFrom, dateTo, fetchRecords]);
 
   const subPlans = analytics?.subPlans || [];
   const pieData  = subPlans.map((s, i) => ({

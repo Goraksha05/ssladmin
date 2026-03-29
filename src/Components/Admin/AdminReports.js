@@ -7,7 +7,7 @@ import { saveAs } from 'file-saver';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import {
-  PageHeader, Card, Btn, Badge, Select, SearchBar,
+  PageHeader, Card, Btn, Select, SearchBar,
   Table, Pagination, DateRangeFilter, AdminUIStyles,
 } from './AdminUI';
 

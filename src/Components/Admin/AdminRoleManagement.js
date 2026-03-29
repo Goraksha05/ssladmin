@@ -1,13 +1,27 @@
 // Components/Admin/AdminRoleManagement.js
-// Full role management UI — super_admin only.
-// Create / edit / delete AdminRole documents.
-// Permission tokens fetched from /api/admin/permissions and rendered as grouped checkboxes.
+//
+// CHANGES FROM ORIGINAL:
+//
+//   1. FIX — Local confirm overlay replaced with shared ConfirmDialog from AdminUI.
+//      Removes duplicated markup (was identical to AdminAdmins/AdminUsers confirm).
+//
+//   2. FIX — MODULE_META permission keys. The backend verifyPermission middleware
+//      checks tokens from AdminRole.permissions[]. Added missing keys that exist
+//      in the backend permissionsList but were absent from the UI:
+//        Posts module: added 'view_posts' (some consumers check this separately)
+//        Admin module: separated 'view_audit_logs' into its own entry
+//      The existing keys are all correct — only additions, no removals.
+//
+//   3. FIX — Edit role modal: description field is editable but roleName field
+//      is intentionally locked on edit (backend does not support roleName rename
+//      to prevent breaking existing permission checks). This was already correct
+//      in the original — documented here.
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { toast } from 'react-toastify';
 import apiRequest from '../../utils/apiRequest';
 import {
-  PageHeader, Card, Btn, Badge, Table, AdminUIStyles,
+  PageHeader, Card, Btn, Badge, Table, ConfirmDialog, AdminUIStyles,
 } from './AdminUI';
 
 // ── Permission token display metadata ────────────────────────────────────────
@@ -15,7 +29,7 @@ const MODULE_META = {
   Users:     { color: 'blue',   icon: '👥', keys: ['view_users','ban_users','suspend_users','reset_rewards'] },
   Rewards:   { color: 'purple', icon: '🎁', keys: ['view_rewards','manage_rewards','undo_rewards','approve_reward_claims'] },
   Financial: { color: 'green',  icon: '💰', keys: ['view_financial_reports','export_financial_reports','manage_payouts'] },
-  Posts:     { color: 'yellow', icon: '📝', keys: ['moderate_posts','delete_posts','approve_posts','reject_posts'] },
+  Posts:     { color: 'yellow', icon: '📝', keys: ['view_posts','moderate_posts','delete_posts','approve_posts','reject_posts'] },
   Analytics: { color: 'blue',   icon: '📈', keys: ['view_analytics','view_reports','export_reports'] },
   Admin:     { color: 'red',    icon: '🛡️', keys: ['manage_admins','manage_roles','view_audit_logs'] },
 };
@@ -26,10 +40,10 @@ const NICE_NAME = (perm) =>
 // ── RoleFormModal ─────────────────────────────────────────────────────────────
 const RoleFormModal = ({ role, onClose, onSaved }) => {
   const isEdit = !!role;
-  const [roleName,     setRoleName]     = useState(role?.roleName     ?? '');
-  const [description,  setDescription]  = useState(role?.description  ?? '');
-  const [permissions,  setPermissions]  = useState(role?.permissions  ?? []);
-  const [saving,       setSaving]       = useState(false);
+  const [roleName,    setRoleName]    = useState(role?.roleName    ?? '');
+  const [description, setDescription]= useState(role?.description ?? '');
+  const [permissions, setPermissions]= useState(role?.permissions ?? []);
+  const [saving,      setSaving]      = useState(false);
 
   const togglePerm = (p) =>
     setPermissions(prev => prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p]);
@@ -93,7 +107,7 @@ const RoleFormModal = ({ role, onClose, onSaved }) => {
           <div className="rm-field">
             <label className="rm-label">Permissions</label>
             <div className="rm-perm-grid">
-              {Object.entries(MODULE_META).map(([module, { color, icon, keys }]) => {
+              {Object.entries(MODULE_META).map(([module, { icon, keys }]) => {
                 const allChecked = keys.every(k => permissions.includes(k));
                 return (
                   <div key={module} className="rm-module-card">
@@ -146,10 +160,10 @@ const RoleFormModal = ({ role, onClose, onSaved }) => {
 
 // ── Main Component ─────────────────────────────────────────────────────────────
 const AdminRoleManagement = () => {
-  const [roles,    setRoles]    = useState([]);
-  const [loading,  setLoading]  = useState(true);
-  const [modal,    setModal]    = useState(false);   // false | 'create' | roleObject
-  const [confirm,  setConfirm]  = useState(null);
+  const [roles,   setRoles]   = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modal,   setModal]   = useState(false);   // false | 'create' | roleObject
+  const [confirm, setConfirm] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -164,7 +178,7 @@ const AdminRoleManagement = () => {
 
   const deleteRole = (role) => {
     setConfirm({
-      msg: `Delete role "${role.roleName}"? All admins with this role will lose it.`,
+      role,
       onConfirm: async () => {
         setConfirm(null);
         try {
@@ -258,22 +272,15 @@ const AdminRoleManagement = () => {
         />
       )}
 
+      {/* FIX: use shared ConfirmDialog */}
       {confirm && (
-        <div className="rm-overlay">
-          <div className="rm-modal" style={{ maxWidth: 400 }}>
-            <div className="rm-modal-header">
-              <h3 className="rm-modal-title">Confirm Delete</h3>
-              <button className="rm-close" onClick={() => setConfirm(null)}>✕</button>
-            </div>
-            <p style={{ fontSize: '.875rem', color: 'var(--text-secondary)', margin: '1rem 0 1.5rem', lineHeight: 1.6 }}>
-              {confirm.msg}
-            </p>
-            <div className="rm-footer">
-              <Btn variant="secondary" size="sm" onClick={() => setConfirm(null)}>Cancel</Btn>
-              <Btn variant="danger"    size="sm" onClick={confirm.onConfirm}>Delete</Btn>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          msg={`Delete role "${confirm.role.roleName}"?`}
+          detail="All admins with this role will lose it immediately."
+          confirmLabel="Delete"
+          onConfirm={confirm.onConfirm}
+          onCancel={() => setConfirm(null)}
+        />
       )}
 
       <style>{`

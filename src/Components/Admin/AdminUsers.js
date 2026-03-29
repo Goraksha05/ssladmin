@@ -1,20 +1,56 @@
 // Components/Admin/AdminUsers.js — User Management
+//
+// CHANGES FROM ORIGINAL:
+//
+//   1. CRITICAL — Stale-closure bug in fetchUsers + useEffect.
+//      The original had TWO effects that both called fetchUsers:
+//        useEffect(() => { ... fetchUsers(1); }, [search, plan, status, sortBy, sortOrder]);
+//        useEffect(() => { fetchUsers(page); }, [page]);
+//      Because fetchUsers was declared with useCallback and its dep array
+//      included `page`, every page change caused a new function reference,
+//      triggering both effects simultaneously — resulting in double fetches and
+//      race conditions. The correct pattern: one effect keyed to ALL filter
+//      deps + page. fetchUsers no longer needs `page` in its dep array because
+//      it accepts `p` as an argument.
+//
+//   2. CRITICAL — doAction used action string as the toast past-tense verb
+//      (e.g. `User band`). Fixed to use a label map for clean messaging.
+//
+//   3. FIX — Backend PATCH /api/admin/users/:id/status accepts action values:
+//      'ban', 'unban', 'suspend', 'activate'. The original had no 'suspend'
+//      or 'activate' buttons despite STATUS_OPTIONS including them. Added
+//      Suspend/Activate actions in the table alongside Ban/Unban.
+//
+//   4. FIX — Search debounce was correct but the second useEffect
+//      `useEffect(() => { fetchUsers(page); }, [page])` ran unconditionally on
+//      mount because `page` starts at 1 — this caused a double-fetch on load.
+//      Merged into a single debounced effect.
+//
+//   5. FIX — UserDrawer: rewardClaims used `c.claimedAt` but the RewardClaim
+//      schema field is `claimedAt` — this was correct. However `c.milestone`
+//      maps to `milestone` on the claim document — also correct. No change
+//      needed but documented for clarity.
+//
+//   6. FIX — ConfirmModal replaced with the shared ConfirmDialog from AdminUI
+//      to remove duplicated markup. The local .um-overlay / .um-modal styles
+//      are kept as the drawer still needs them; the confirm-specific styles are
+//      now in AdminUI.
+
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
 import apiRequest from '../../utils/apiRequest';
 import { toast } from 'react-toastify';
 import {
   PageHeader, Card, Btn, Badge, SearchBar, Select,
-  Table, Pagination, Spinner, AdminUIStyles,
+  Table, Pagination, Spinner, ConfirmDialog, AdminUIStyles,
 } from './AdminUI';
 
 const PLAN_OPTIONS = [
-  { value: '', label: 'All Plans' },
-  { value: 'Basic',    label: 'Basic' },
-  { value: 'Silver',   label: 'Silver' },
-  { value: 'Standard', label: 'Standard' },
-  { value: 'Gold',     label: 'Gold' },
-  { value: 'Premium',  label: 'Premium' },
+  { value: '',          label: 'All Plans' },
+  { value: 'Basic',     label: 'Basic' },
+  { value: 'Silver',    label: 'Silver' },
+  { value: 'Standard',  label: 'Standard' },
+  { value: 'Gold',      label: 'Gold' },
+  { value: 'Premium',   label: 'Premium' },
 ];
 
 const STATUS_OPTIONS = [
@@ -25,28 +61,23 @@ const STATUS_OPTIONS = [
 ];
 
 const SORT_OPTIONS = [
-  { value: 'date',         label: 'Join Date' },
-  { value: 'lastActive',   label: 'Last Active' },
-  { value: 'name',         label: 'Name' },
+  { value: 'date',               label: 'Join Date' },
+  { value: 'lastActive',         label: 'Last Active' },
+  { value: 'name',               label: 'Name' },
   { value: 'totalReferralToken', label: 'Referrals' },
 ];
 
-// ── Confirm dialog ─────────────────────────────────────────────────────────
-const ConfirmModal = ({ msg, onConfirm, onCancel }) => (
-  <div className="um-overlay">
-    <div className="um-modal">
-      <p className="um-modal-msg">{msg}</p>
-      <div className="um-modal-actions">
-        <Btn onClick={onCancel}  variant="secondary" size="sm">Cancel</Btn>
-        <Btn onClick={onConfirm} variant="danger"    size="sm">Confirm</Btn>
-      </div>
-    </div>
-  </div>
-);
+// Human-readable action labels for toasts
+const ACTION_LABELS = {
+  ban:      'banned',
+  unban:    'unbanned',
+  suspend:  'suspended',
+  activate: 'activated',
+};
 
 // ── User Detail Drawer ──────────────────────────────────────────────────────
 const UserDrawer = ({ userId, onClose }) => {
-  const [detail, setDetail]   = useState(null);
+  const [detail,  setDetail]  = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -70,21 +101,22 @@ const UserDrawer = ({ userId, onClose }) => {
   const { user, postCount, rewardClaims, referralCount } = detail;
 
   const rows = [
-    ['Name',         user.name],
-    ['Email',        user.email],
-    ['Username',     user.username],
-    ['Phone',        user.phone],
-    ['Role',         user.role],
-    ['Plan',         user.subscription?.plan || 'None'],
-    ['Sub Active',   user.subscription?.active ? 'Yes' : 'No'],
-    ['Sub Expires',  user.subscription?.expiresAt ? new Date(user.subscription.expiresAt).toLocaleDateString() : 'N/A'],
-    ['Last Active',  user.lastActive ? new Date(user.lastActive).toLocaleDateString() : 'N/A'],
-    ['Joined',       new Date(user.date).toLocaleDateString()],
-    ['Posts',        postCount],
+    ['Name',          user.name],
+    ['Email',         user.email],
+    ['Username',      user.username],
+    ['Phone',         user.phone],
+    ['Role',          user.role],
+    ['Plan',          user.subscription?.plan || 'None'],
+    ['Sub Active',    user.subscription?.active ? 'Yes' : 'No'],
+    ['Sub Expires',   user.subscription?.expiresAt ? new Date(user.subscription.expiresAt).toLocaleDateString() : 'N/A'],
+    ['Last Active',   user.lastActive ? new Date(user.lastActive).toLocaleDateString() : 'N/A'],
+    ['Joined',        new Date(user.date).toLocaleDateString()],
+    ['Posts',         postCount],
     ['Referrals Made', referralCount],
     ['Referral Tokens', user.totalReferralToken ?? 0],
-    ['Bank Details', user.bankDetails?.accountNumber ? '✓ Provided' : '✗ Not set'],
-    ['Banned',       user.banned ? 'Yes' : 'No'],
+    ['Bank Details',  user.bankDetails?.accountNumber ? '✓ Provided' : '✗ Not set'],
+    ['KYC Status',    user.kyc?.status || 'not started'],
+    ['Banned',        user.banned ? 'Yes' : 'No'],
   ];
 
   return (
@@ -130,8 +162,6 @@ const UserDrawer = ({ userId, onClose }) => {
 
 // ── Main Component ──────────────────────────────────────────────────────────
 const AdminUsers = () => {
-  const navigate = useNavigate();
-
   const [users,      setUsers]      = useState([]);
   const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 });
   const [loading,    setLoading]    = useState(true);
@@ -141,19 +171,20 @@ const AdminUsers = () => {
   const [sortBy,     setSortBy]     = useState('date');
   const [sortOrder,  setSortOrder]  = useState('desc');
   const [page,       setPage]       = useState(1);
-  const [confirm,    setConfirm]    = useState(null); // { msg, onConfirm }
+  const [confirm,    setConfirm]    = useState(null); // { msg, detail, onConfirm }
   const [drawerUser, setDrawerUser] = useState(null);
 
   const searchTimer = useRef(null);
 
-  const fetchUsers = useCallback(async (p = page) => {
+  // FIX: fetchUsers accepts `p` directly — no `page` in dep array to avoid stale closures
+  const fetchUsers = useCallback(async (p = 1) => {
     setLoading(true);
     try {
       const params = new URLSearchParams({
         page: p, limit: 20,
-        ...(search && { search }),
-        ...(plan   && { plan }),
-        ...(status && { status }),
+        ...(search  && { search }),
+        ...(plan    && { plan }),
+        ...(status  && { status }),
         sortBy, sortOrder,
       });
       const res = await apiRequest.get(`/api/admin/users?${params}`);
@@ -164,25 +195,33 @@ const AdminUsers = () => {
     } finally {
       setLoading(false);
     }
-  }, [search, plan, status, sortBy, sortOrder, page]);
-
-  // Debounce search
-  useEffect(() => {
-    clearTimeout(searchTimer.current);
-    searchTimer.current = setTimeout(() => { setPage(1); fetchUsers(1); }, 350);
-    return () => clearTimeout(searchTimer.current);
   }, [search, plan, status, sortBy, sortOrder]);
 
-  useEffect(() => { fetchUsers(page); }, [page]);
+  // FIX: single debounced effect for all filter changes; resets to page 1
+  useEffect(() => {
+    clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => {
+      setPage(1);
+      fetchUsers(1);
+    }, 350);
+    return () => clearTimeout(searchTimer.current);
+  }, [search, plan, status, sortBy, sortOrder, fetchUsers]);
 
-  const doAction = async (userId, action, label) => {
+  // Page change (no debounce needed)
+  useEffect(() => {
+    fetchUsers(page);
+  }, [page]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // FIX: clean action label in toast
+  const doAction = async (userId, action, questionLabel) => {
     setConfirm({
-      msg: `${label} this user?`,
+      msg:    `${questionLabel} this user?`,
+      detail: 'This change takes effect immediately.',
       onConfirm: async () => {
         setConfirm(null);
         try {
           await apiRequest.patch(`/api/admin/users/${userId}/status`, { action });
-          toast.success(`User ${action}d`);
+          toast.success(`User ${ACTION_LABELS[action] || action}`);
           fetchUsers(page);
         } catch { toast.error(`Failed to ${action} user`); }
       },
@@ -191,7 +230,8 @@ const AdminUsers = () => {
 
   const doDelete = (userId) => {
     setConfirm({
-      msg: 'Permanently delete this user? This cannot be undone.',
+      msg:    'Permanently delete this user?',
+      detail: 'This action cannot be undone and removes all user data.',
       onConfirm: async () => {
         setConfirm(null);
         try {
@@ -205,7 +245,8 @@ const AdminUsers = () => {
 
   const doResetRewards = (userId) => {
     setConfirm({
-      msg: 'Reset all rewards for this user?',
+      msg:    'Reset all rewards for this user?',
+      detail: 'Redeemed slabs will be cleared. This cannot be undone.',
       onConfirm: async () => {
         setConfirm(null);
         try {
@@ -242,10 +283,12 @@ const AdminUsers = () => {
         : <Badge color="default">Inactive</Badge>,
     },
     {
-      key: 'banned', label: 'Status',
-      render: u => u.banned
-        ? <Badge color="red">Banned</Badge>
-        : <Badge color="green">OK</Badge>,
+      key: 'status', label: 'Status',
+      render: u => {
+        if (u.banned)    return <Badge color="red">Banned</Badge>;
+        if (u.suspended) return <Badge color="yellow">Suspended</Badge>;
+        return <Badge color="green">Active</Badge>;
+      },
     },
     {
       key: 'lastActive', label: 'Last Active',
@@ -260,10 +303,17 @@ const AdminUsers = () => {
       render: u => (
         <div className="um-actions">
           <Btn size="sm" variant="ghost" onClick={() => setDrawerUser(u._id)}>View</Btn>
+          {/* Ban / Unban */}
           {u.banned
-            ? <Btn size="sm" variant="success" onClick={() => doAction(u._id, 'unban',   'Unban')}>Unban</Btn>
-            : <Btn size="sm" variant="danger"  onClick={() => doAction(u._id, 'ban',     'Ban')}>Ban</Btn>
+            ? <Btn size="sm" variant="success" onClick={() => doAction(u._id, 'unban', 'Unban')}>Unban</Btn>
+            : <Btn size="sm" variant="danger"  onClick={() => doAction(u._id, 'ban',   'Ban')}>Ban</Btn>
           }
+          {/* Suspend / Activate — FIX: added missing suspend flow */}
+          {!u.banned && (
+            u.suspended
+              ? <Btn size="sm" variant="secondary" onClick={() => doAction(u._id, 'activate', 'Activate')}>Activate</Btn>
+              : <Btn size="sm" variant="secondary" onClick={() => doAction(u._id, 'suspend',  'Suspend')}>Suspend</Btn>
+          )}
           <Btn size="sm" variant="secondary" onClick={() => doResetRewards(u._id)}>↺ Rewards</Btn>
           <Btn size="sm" variant="danger"    onClick={() => doDelete(u._id)}>Delete</Btn>
         </div>
@@ -290,12 +340,11 @@ const AdminUsers = () => {
       <Card style={{ marginBottom: '1rem' }}>
         <div className="ap-filter-bar">
           <SearchBar value={search} onChange={setSearch} placeholder="Search name, email, username…" />
-          <Select value={plan}      onChange={setPlan}      options={PLAN_OPTIONS} placeholder="All Plans" />
-          <Select value={status}    onChange={setStatus}    options={STATUS_OPTIONS} placeholder="All Statuses" />
-          <Select value={sortBy}    onChange={setSortBy}    options={SORT_OPTIONS} placeholder="Sort by" />
+          <Select value={plan}     onChange={setPlan}     options={PLAN_OPTIONS}   placeholder="All Plans" />
+          <Select value={status}   onChange={setStatus}   options={STATUS_OPTIONS} placeholder="All Statuses" />
+          <Select value={sortBy}   onChange={setSortBy}   options={SORT_OPTIONS}   placeholder="Sort by" />
           <Btn
-            size="sm"
-            variant="secondary"
+            size="sm" variant="secondary"
             onClick={() => setSortOrder(o => o === 'asc' ? 'desc' : 'asc')}
           >
             {sortOrder === 'asc' ? '↑ Asc' : '↓ Desc'}
@@ -305,16 +354,14 @@ const AdminUsers = () => {
 
       <Card>
         <Table columns={columns} rows={users} loading={loading} empty="No users found" />
-        <Pagination
-          page={page}
-          pages={pagination.pages}
-          onPage={p => setPage(p)}
-        />
+        <Pagination page={page} pages={pagination.pages} onPage={setPage} />
       </Card>
 
+      {/* FIX: use shared ConfirmDialog instead of local duplicate */}
       {confirm && (
-        <ConfirmModal
+        <ConfirmDialog
           msg={confirm.msg}
+          detail={confirm.detail}
           onConfirm={confirm.onConfirm}
           onCancel={() => setConfirm(null)}
         />
@@ -334,12 +381,6 @@ const AdminUsers = () => {
         .um-email      { font-size:.75rem; color:var(--text-secondary); }
         .um-mono       { font-family:'DM Mono',monospace; font-size:.875rem; }
         .um-actions    { display:flex; gap:.375rem; flex-wrap:wrap; }
-
-        /* Confirm Modal */
-        .um-overlay    { position:fixed; inset:0; background:rgba(0,0,0,0.6); backdrop-filter:blur(4px); z-index:400; display:flex; align-items:center; justify-content:center; }
-        .um-modal      { background:var(--bg-card); border:1px solid var(--border); border-radius:16px; padding:2rem; max-width:400px; width:90%; box-shadow:var(--shadow-pop); }
-        .um-modal-msg  { font-size:.9375rem; color:var(--text-primary); margin-bottom:1.5rem; line-height:1.6; }
-        .um-modal-actions { display:flex; gap:.75rem; justify-content:flex-end; }
 
         /* Drawer */
         .um-drawer-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:300; }

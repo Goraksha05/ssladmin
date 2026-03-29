@@ -1,9 +1,9 @@
 // Components/Admin/AdminContent.js — Content Moderation
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import apiRequest from '../../utils/apiRequest';
 import { toast } from 'react-toastify';
 import {
-  PageHeader, Card, Btn, Badge, Select, SearchBar,
+  PageHeader, Card, Btn, Badge, Select,
   Table, Pagination, DateRangeFilter, AdminUIStyles,
 } from './AdminUI';
 
@@ -86,7 +86,7 @@ const AdminContent = () => {
   }, [status, dateFrom, dateTo, page]);
 
   useEffect(() => { setPage(1); }, [status, dateFrom, dateTo]);
-  useEffect(() => { fetchPosts(page); }, [page, status, dateFrom, dateTo]);
+  useEffect(() => { fetchPosts(page); }, [page, status, dateFrom, dateTo, fetchPosts]);
 
   const moderate = async (postId, newStatus) => {
     try {

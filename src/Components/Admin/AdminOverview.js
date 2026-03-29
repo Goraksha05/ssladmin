@@ -1,7 +1,7 @@
 // Components/Admin/AdminOverview.js — Analytics Dashboard
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  ResponsiveContainer, AreaChart, Area, BarChart, Bar,
+  ResponsiveContainer, AreaChart, Area,
   XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, Legend,
 } from 'recharts';
 import apiRequest from '../../utils/apiRequest';
@@ -54,7 +54,7 @@ const AdminOverview = () => {
   if (loading) return <Spinner size={48} />;
   if (!data)   return <div className="ov-error">Failed to load. <Btn onClick={fetchAnalytics} size="sm">Retry</Btn></div>;
 
-  const { totals, growthChart, postsGrowthChart, subPlans, topReferrers, topPosters } = data;
+  const { totals, growthChart = [], postsGrowthChart = [], subPlans = [], topReferrers = [], topPosters = [] } = data;
 
   // Merge user + post growth for combined chart
   const combinedGrowth = (() => {

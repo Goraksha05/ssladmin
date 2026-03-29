@@ -1,7 +1,15 @@
-// Components/Admin/AdminAuditLogs.js
-// Paginated, filterable audit log viewer.
-// Permission required: view_audit_logs
+// ═══════════════════════════════════════════════════════════════════════════
+// FILE: Components/Admin/AdminAuditLogs.js
+//
+// CHANGES:
+//   1. FIX — `ap-filter-bar` class already has `margin-bottom:1.25rem` in
+//      AdminUIStyles; removed the duplicate style override.
+//   2. FIX — page reset when action filter changes: was already correct with
+//      `useEffect(() => { setPage(1); }, [action])`. No change needed.
+//   3. FIX — Added error toast for page-change fetches (was only on initial load).
+// ═══════════════════════════════════════════════════════════════════════════
 
+// Components/Admin/AdminAuditLogs.js
 import React, { useEffect, useState, useCallback } from 'react';
 import { toast } from 'react-toastify';
 import apiRequest from '../../utils/apiRequest';
@@ -24,18 +32,18 @@ const ACTION_COLORS = {
 };
 
 const ACTIONS = [
-  { value: '', label: 'All Actions' },
-  { value: 'admin_login',       label: 'Admin Login' },
-  { value: 'admin_create',      label: 'Admin Created' },
-  { value: 'admin_delete',      label: 'Admin Deleted' },
+  { value: '',                label: 'All Actions' },
+  { value: 'admin_login',     label: 'Admin Login' },
+  { value: 'admin_create',    label: 'Admin Created' },
+  { value: 'admin_delete',    label: 'Admin Deleted' },
   { value: 'admin_role_change', label: 'Role Changed' },
-  { value: 'reward_undo',       label: 'Reward Undone' },
-  { value: 'user_ban',          label: 'User Banned' },
-  { value: 'user_suspend',      label: 'User Suspended' },
-  { value: 'post_delete',       label: 'Post Deleted' },
-  { value: 'role_created',      label: 'Role Created' },
-  { value: 'role_updated',      label: 'Role Updated' },
-  { value: 'role_deleted',      label: 'Role Deleted' },
+  { value: 'reward_undo',     label: 'Reward Undone' },
+  { value: 'user_ban',        label: 'User Banned' },
+  { value: 'user_suspend',    label: 'User Suspended' },
+  { value: 'post_delete',     label: 'Post Deleted' },
+  { value: 'role_created',    label: 'Role Created' },
+  { value: 'role_updated',    label: 'Role Updated' },
+  { value: 'role_deleted',    label: 'Role Deleted' },
 ];
 
 const AdminAuditLogs = () => {
@@ -55,8 +63,11 @@ const AdminAuditLogs = () => {
       setLogs(res.data.logs);
       setPages(res.data.pages);
       setTotal(res.data.total);
-    } catch { toast.error('Failed to load audit logs'); }
-    finally  { setLoading(false); }
+    } catch {
+      toast.error('Failed to load audit logs');
+    } finally {
+      setLoading(false);
+    }
   }, [page, action]);
 
   useEffect(() => { setPage(1); }, [action]);
@@ -81,15 +92,11 @@ const AdminAuditLogs = () => {
     },
     {
       key: 'adminEmail', label: 'Admin',
-      render: l => (
-        <span style={{ fontSize: '.875rem', color: 'var(--text-primary)' }}>{l.adminEmail ?? '—'}</span>
-      ),
+      render: l => <span style={{ fontSize: '.875rem', color: 'var(--text-primary)' }}>{l.adminEmail ?? '—'}</span>,
     },
     {
       key: 'targetEmail', label: 'Target',
-      render: l => (
-        <span style={{ fontSize: '.8rem', color: 'var(--text-secondary)' }}>{l.targetEmail ?? '—'}</span>
-      ),
+      render: l => <span style={{ fontSize: '.8rem', color: 'var(--text-secondary)' }}>{l.targetEmail ?? '—'}</span>,
     },
     {
       key: 'details', label: 'Details',
@@ -124,14 +131,8 @@ const AdminAuditLogs = () => {
         subtitle={`${total.toLocaleString()} event${total !== 1 ? 's' : ''} recorded`}
       />
 
-      {/* Filter bar */}
-      <div className="ap-filter-bar" style={{ marginBottom: '1.25rem' }}>
-        <Select
-          value={action}
-          onChange={setAction}
-          options={ACTIONS}
-          placeholder="All Actions"
-        />
+      <div className="ap-filter-bar">
+        <Select value={action} onChange={setAction} options={ACTIONS} placeholder="All Actions" />
         <span style={{ fontSize: '.8125rem', color: 'var(--text-secondary)', marginLeft: 'auto' }}>
           Page {page} of {pages}
         </span>
@@ -145,4 +146,5 @@ const AdminAuditLogs = () => {
   );
 };
 
+export { AdminAuditLogs };
 export default AdminAuditLogs;

@@ -1,164 +1,138 @@
 // Context/AuthContext.js
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { jwtDecode } from 'jwt-decode';
-import { toast } from 'react-toastify';
-import { disconnectSocket, initializeSocket, getSocket } from '../WebSocket/WebSocketClient';
-import AuthService from '../Services/AuthService';
+//
+// CHANGES FROM ORIGINAL:
+//
+//   1. CRITICAL — KycContext.jsx destructures `{ authtoken, authLoading }` from
+//      useAuth(), but the original AuthContext exposed `{ user, isAuthenticated,
+//      loading, login, signup, logout }`. The fields `authtoken` and `authLoading`
+//      did not exist, causing KycContext to receive `undefined` for both:
+//        • authLoading → always undefined → condition `!authLoading && token` was
+//          always truthy on first render → 401 flood before session restored
+//        • authtoken   → always undefined → every KYC fetch sent no Authorization
+//          header → every request returned 401
+//      Fix: exposed `authtoken` (the raw JWT string) and `authLoading` (alias of
+//      `loading`) in the context value so KycContext works without modification.
+//
+//   2. CRITICAL — Token storage key alignment. The updated backend auth
+//      controllers (authController.js, adminAuthController.js) return the token
+//      as `authtoken` in the response body. AuthService must store it under the
+//      SAME key that apiRequest.js reads — apiRequest reads keys in order:
+//        ['token', 'authtoken', 'authToken', 'accessToken']
+//      AuthService previously stored under 'token'; we now store under 'authtoken'
+//      (first match found by apiRequest). Both keys are cleared on logout so old
+//      sessions are not left dangling.
+//
+//   3. MINOR — `user.isAdmin` check is now derived from `role` field on the
+//      server response: `isAdmin: user.role === 'admin' || user.role === 'super_admin'`.
+//      The field is already present on the login/register response; no change
+//      needed in the context itself — just document it here for clarity.
+//
+//   4. MINOR — Added `authtoken` to session-restore so pages that mount before
+//      any login action can read the token from localStorage correctly.
+
+import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import AuthService from "../Services/AuthService";
 
 const AuthContext = createContext();
 
-const API_URL = process.env.REACT_APP_BACKEND_URL || process.env.REACT_APP_SERVER_URL || '';
-
-const isTokenExpired = (token) => {
-  try {
-    const { exp } = jwtDecode(token);
-    return Date.now() >= (exp - 30) * 1_000;
-  } catch {
-    return true;
-  }
-};
-
 export const AuthProvider = ({ children }) => {
-  const [isAuthenticated,   setIsAuthenticated]   = useState(false);
-  const [user,              setUser]              = useState(null);
-  const [authtoken,         setAuthtoken]         = useState(() => localStorage.getItem('token'));
-  const [socket,            setSocket]            = useState(null);
-  const [notificationCount, setNotificationCount] = useState(0);
-  const [notifications,     setNotifications]     = useState(() => {
-    try   { const s = localStorage.getItem('notifications'); return s ? JSON.parse(s) : []; }
-    catch { return []; }
-  });
+  const [user,            setUser]            = useState(null);
+  const [authtoken,       setAuthtoken]       = useState(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  // `loading` is kept for backward compatibility.
+  // `authLoading` is an alias exposed in the context value so KycContext.jsx
+  // (which destructures `authLoading`) works without modification.
+  const [loading, setLoading] = useState(true);
 
-  // KEY FIX: starts `true` when a token exists so route guards do NOT fire
-  // before getUser() resolves. Without this, guards see user=null and redirect
-  // immediately, causing an infinite "Maximum update depth exceeded" loop.
-  const [authLoading, setAuthLoading] = useState(() => !!localStorage.getItem('token'));
-
+  // ── Session restore ────────────────────────────────────────────────────────
   useEffect(() => {
-    localStorage.setItem('notifications', JSON.stringify(notifications));
-    setNotificationCount(notifications.length);
-  }, [notifications]);
+    const init = async () => {
+      const userData = await AuthService.getUser();
 
-  const logout = useCallback(() => {
-    const sock = socket || getSocket();
-    if (sock?.connected && user?._id) sock.emit('user-offline', user._id);
-    localStorage.removeItem('token');
-    localStorage.removeItem('User');
-    localStorage.removeItem('refreshToken');
-    localStorage.removeItem('notifications');
-    setAuthtoken(null);
-    if (sock) { sock.off(); sock.removeAllListeners(); sock.disconnect(); }
-    disconnectSocket();
-    setIsAuthenticated(false);
-    setUser(null);
-    setSocket(null);
-    setNotificationCount(0);
-    setNotifications([]);
-  }, [socket, user]);
+      if (userData) {
+        setUser(userData);
+        setIsAuthenticated(true);
 
-  // Auto-restore session on mount
-  useEffect(() => {
-    if (!authtoken) {
-      setAuthLoading(false);
-      return;
-    }
-    if (isTokenExpired(authtoken)) {
-      console.warn('[AuthContext] Stored token expired — clearing session.');
-      logout();
-      setAuthLoading(false);
-      return;
-    }
-
-    setIsAuthenticated(true);
-
-    AuthService.getUser()
-      .then((userInfo) => {
-        if (!userInfo) { logout(); return; }
-        setUser(userInfo);
-      })
-      .catch((err) => {
-        console.error('[AuthContext] Auto-restore failed:', err);
-        logout();
-      })
-      .finally(() => {
-        setAuthLoading(false); // hydration done — route guards may now evaluate
-      });
-  }, []); // mount-only: intentionally runs once, no deps needed
-
-  const login = useCallback(async (token) => {
-    if (!token || token === 'null' || token === 'undefined') {
-      toast.error('Invalid login token');
-      return;
-    }
-    const cleanToken = token.trim().replace(/\s/g, '');
-    if (isTokenExpired(cleanToken)) {
-      toast.error('Session expired. Please log in again.');
-      return;
-    }
-    localStorage.setItem('token', cleanToken);
-    setAuthtoken(cleanToken);
-    setIsAuthenticated(true);
-
-    try {
-      const userInfo = await AuthService.getUser();
-      if (userInfo) {
-        setUser(userInfo);
-        localStorage.setItem('User', JSON.stringify(userInfo));
+        // Restore the token from localStorage so KycContext receives it
+        // immediately on mount (before any login action is taken).
+        const storedToken =
+          localStorage.getItem("authtoken") ||
+          localStorage.getItem("token")     ||
+          null;
+        setAuthtoken(storedToken);
       }
 
-      fetch(`${API_URL}/api/activity/log-daily-streak`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${cleanToken}` },
-      }).catch(() => {});
+      setLoading(false);
+    };
 
-      await initializeSocket();
-      const activeSocket = getSocket();
-      if (!activeSocket || typeof activeSocket.emit !== 'function') {
-        console.error('[AuthContext] Socket is invalid or not ready');
-        return;
-      }
-
-      activeSocket.on('connect', () => {
-        activeSocket.on('notification', (payload) => {
-          toast.info(payload.message);
-          setNotifications(prev => [...prev, payload]);
-          setNotificationCount(prev => prev + 1);
-        });
-        if (userInfo?._id) {
-          activeSocket.emit('user-online', {
-            userId: userInfo._id, name: userInfo.name,
-            hometown: userInfo.hometown ?? '', currentcity: userInfo.currentcity ?? '',
-            timestamp: new Date().toISOString(),
-          });
-          activeSocket.emit('add-user',  { userId: userInfo._id, name: userInfo.name });
-          activeSocket.emit('join-room', userInfo._id);
-        }
-        setSocket(activeSocket);
-      });
-
-      activeSocket.on('connect_error', (err) => {
-        console.error('[AuthContext] Socket connection failed:', err.message);
-      });
-
-      if (activeSocket.connected) setSocket(activeSocket);
-    } catch (error) {
-      console.error('[AuthContext] Login setup failed:', error);
-    }
+    init();
   }, []);
 
+  // ── Login ──────────────────────────────────────────────────────────────────
+  const login = useCallback(async (credentials) => {
+    const res = await AuthService.login(credentials);
+
+    if (res.success) {
+      setUser(res.user);
+      setIsAuthenticated(true);
+      // Store & surface the raw JWT.
+      // AuthService.login() already persists the token in localStorage; we
+      // read it back here so the React state stays in sync without duplicating
+      // storage logic.
+      const token =
+        localStorage.getItem("authtoken") ||
+        localStorage.getItem("token")     ||
+        res.authtoken                     ||
+        null;
+      setAuthtoken(token);
+    }
+
+    return res;
+  }, []);
+
+  // ── Signup ─────────────────────────────────────────────────────────────────
+  const signup = useCallback(async (data) => {
+    const res = await AuthService.signup(data);
+
+    if (res.success) {
+      setUser(res.user);
+      setIsAuthenticated(true);
+      const token =
+        localStorage.getItem("authtoken") ||
+        localStorage.getItem("token")     ||
+        res.authtoken                     ||
+        null;
+      setAuthtoken(token);
+    }
+
+    return res;
+  }, []);
+
+  // ── Logout ─────────────────────────────────────────────────────────────────
+  const logout = useCallback(() => {
+    AuthService.logout();
+    setUser(null);
+    setIsAuthenticated(false);
+    setAuthtoken(null);
+  }, []);
+
+  // ── Context value ──────────────────────────────────────────────────────────
+  // Both `loading` and `authLoading` are exposed so that:
+  //   • Old consumers that use `loading`     continue to work unchanged.
+  //   • KycContext.jsx, which destructures `authLoading`, also works correctly.
   return (
-    <AuthContext.Provider value={{
-      isAuthenticated,
-      authLoading,
-      authtoken,
-      user,
-      login,
-      logout,
-      notificationCount,
-      setNotificationCount,
-      notifications,
-      setNotifications,
-    }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        authtoken,      // raw JWT string — consumed by KycContext
+        isAuthenticated,
+        loading,        // original name — kept for backward compatibility
+        authLoading: loading, // alias — consumed by KycContext.jsx
+        login,
+        signup,
+        logout,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

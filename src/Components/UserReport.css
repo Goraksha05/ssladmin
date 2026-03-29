@@ -1,0 +1,80 @@
+        .ur-root  { display:flex; flex-direction:column; gap:1.5rem; }
+        .ur-center { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:4rem 2rem; gap:1rem; text-align:center; }
+        .ur-title  { margin:0; font-size:1.25rem; font-weight:700; color:var(--text-primary); }
+        .ur-muted  { margin:0; font-size:.875rem; color:var(--text-secondary); }
+
+        .ur-header { display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; flex-wrap:wrap; }
+        .ur-page-title { font-size:1.625rem; font-weight:700; color:var(--text-primary); margin:0; letter-spacing:-0.02em; }
+        .ur-page-sub { font-size:.875rem; color:var(--text-secondary); margin:.375rem 0 0; }
+
+        .ur-stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:1rem; }
+        .ur-stat-card { background:var(--bg-card,#fff); border:1px solid var(--border,#e2e8f0);
+          border-radius:.875rem; padding:1.125rem 1.25rem; display:flex; align-items:center; gap:.875rem; transition:all .2s; }
+        .ur-stat-card:hover { transform:translateY(-3px); box-shadow:var(--shadow-pop); }
+        .ur-stat-icon  { font-size:1.875rem; line-height:1; }
+        .ur-stat-body  { display:flex; flex-direction:column; }
+        .ur-stat-value { font-size:1.5rem; font-weight:700; color:var(--text-primary); line-height:1.1; }
+        .ur-stat-label { font-size:.75rem; color:var(--text-secondary); font-weight:500; margin-top:.125rem; }
+
+        .ur-controls { display:flex; justify-content:space-between; gap:.75rem; flex-wrap:wrap; }
+        .ur-controls-left, .ur-controls-right { display:flex; gap:.625rem; flex-wrap:wrap; align-items:center; }
+
+        .ur-search { display:flex; align-items:center; gap:.5rem; background:var(--bg-card,#fff);
+          border:1px solid var(--border,#e2e8f0); border-radius:.5rem; padding:.5rem .875rem;
+          flex:1; min-width:220px; transition:border-color .2s; }
+        .ur-search:focus-within { border-color:var(--accent,#4f46e5); }
+        .ur-search svg { color:var(--text-secondary); flex-shrink:0; }
+        .ur-search-input { flex:1; border:none; outline:none; background:none; font-size:.875rem; color:var(--text-primary); font-family:inherit; }
+        .ur-search-input::placeholder { color:var(--text-secondary); }
+        .ur-clear { background:none; border:none; color:var(--text-secondary); cursor:pointer; font-size:1.125rem; padding:0; }
+
+        .ur-select { padding:.5rem .875rem; border:1px solid var(--border,#e2e8f0); border-radius:.5rem;
+          background:var(--bg-card,#fff); color:var(--text-primary); font-size:.875rem; cursor:pointer; outline:none; font-family:inherit; }
+        .ur-select:focus { border-color:var(--accent,#4f46e5); }
+
+        .ur-sort-btn { padding:.5rem .875rem; border:1px solid var(--border,#e2e8f0); border-radius:.5rem;
+          background:var(--bg-card,#fff); color:var(--text-primary); font-size:1rem; cursor:pointer; transition:all .2s; }
+        .ur-sort-btn:hover { background:var(--bg-canvas,#f8fafc); }
+
+        .ur-dl-btn { display:inline-flex; align-items:center; gap:.375rem; padding:.5rem 1rem;
+          background:linear-gradient(135deg,var(--accent,#4f46e5),#7c3aed); color:#fff; border:none;
+          border-radius:.5rem; font-size:.875rem; font-weight:600; cursor:pointer; transition:all .2s; text-decoration:none; font-family:inherit; }
+        .ur-dl-btn:hover { transform:translateY(-2px); box-shadow:0 6px 14px rgba(79,70,229,.3); }
+
+        .ur-result-info { font-size:.8125rem; color:var(--text-secondary); margin:0; }
+
+        .ur-table-wrap { background:var(--bg-card,#fff); border:1px solid var(--border,#e2e8f0); border-radius:1rem; overflow:hidden; }
+        .ur-table { width:100%; border-collapse:collapse; display:block; overflow-x:auto; }
+        .ur-table thead { background:var(--bg-canvas,#f8fafc); display:table; width:100%; }
+        .ur-table tbody { display:table; width:100%; }
+        .ur-th-sortable { padding:.875rem 1rem; text-align:left; font-size:.6875rem; font-weight:700;
+          color:var(--text-secondary); text-transform:uppercase; letter-spacing:.07em;
+          border-bottom:1.5px solid var(--border,#e2e8f0); white-space:nowrap; cursor:pointer; transition:color .15s; }
+        .ur-th-sortable:hover { color:var(--text-primary); }
+        .ur-sort-indicator { color:var(--accent,#4f46e5); font-size:.75rem; }
+        .ur-table td { padding:.875rem 1rem; border-bottom:1px solid var(--border,#e2e8f0); font-size:.8125rem; color:var(--text-primary); white-space:nowrap; }
+        .ur-row { transition:background .15s; }
+        .ur-row:last-child td { border-bottom:none; }
+        .ur-row:hover td { background:var(--bg-canvas,#f8fafc); }
+
+        .ur-status   { display:inline-block; padding:.25rem .625rem; border-radius:.375rem; font-size:.6875rem; font-weight:700; }
+        .ur-active   { background:rgba(16,185,129,.12); color:#10b981; }
+        .ur-inactive { background:rgba(100,116,139,.12); color:var(--text-secondary); }
+
+        .ur-pagination { display:flex; align-items:center; justify-content:center; gap:1rem; padding:.75rem 0; }
+        .ur-pg-btn { padding:.5rem 1.125rem; border:1px solid var(--border,#e2e8f0); border-radius:.5rem;
+          background:var(--bg-card,#fff); color:var(--text-primary); cursor:pointer; font-size:.875rem;
+          font-family:inherit; transition:all .15s; }
+        .ur-pg-btn:hover:not(:disabled) { background:var(--bg-canvas,#f8fafc); }
+        .ur-pg-btn:disabled { opacity:.4; cursor:default; }
+        .ur-pg-info { font-size:.8125rem; color:var(--text-secondary); }
+
+        .ur-spinner { width:36px; height:36px; border:3px solid var(--border,#e2e8f0);
+          border-top-color:var(--accent,#4f46e5); border-radius:50%; animation:urSpin .8s linear infinite; }
+        @keyframes urSpin { to{transform:rotate(360deg)} }
+
+        @media(max-width:768px) {
+          .ur-controls { flex-direction:column; }
+          .ur-controls-left, .ur-controls-right { width:100%; }
+          .ur-search { min-width:100%; }
+        }

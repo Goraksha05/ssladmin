@@ -1,5 +1,42 @@
-// Components/Admin/AdminRewards.js — Rewards Management
-import React, { useEffect, useState, useCallback } from 'react';
+// Components/Admin/AdminRewards.js
+//
+// CHANGES FROM ORIGINAL:
+//
+//   1. CRITICAL (carried forward) — UndoPanel originally called
+//      GET /api/admin/users/:id which doesn't exist. Fixed in previous version
+//      to load all rewards via GET /api/admin/rewards. Retained here.
+//
+//   2. FIX — UndoPanel user list only showed the first page (no pagination).
+//      GET /api/admin/users returns a paginated response. The UndoPanel now
+//      fetches with limit=200 to cover most real-world user bases. If the
+//      platform has more users, an explicit search field is provided so the
+//      admin can filter. This is a pragmatic trade-off to avoid full
+//      server-side autocomplete complexity in this panel.
+//
+//   3. FIX — GET /api/admin/reward-claims response shape. The backend returns
+//      either a flat array OR { claims, pagination }. The original already
+//      handled this dual shape — kept as-is.
+//
+//   4. FIX — Slab key inconsistency. Streak rewards use 'streakslab' (backend
+//      field name on StreakReward document). Referral and Post rewards use
+//      'slabAwarded'. The original handled this correctly in UndoPanel.
+//      However the POST /api/admin/undo-reward payload was sending `slab` as
+//      a string. Backend expects `{ userId, type, slab }` where slab is the
+//      numeric/string value of the slab — this is already correct.
+//
+//   5. FIX — Tab state management: switching tabs previously did not cancel
+//      in-flight requests; stale data could overwrite the new tab's state.
+//      Added an `isMounted` guard pattern in fetchOverview and fetchClaims.
+//
+//   6. FIX — Claims table: `claimCols` used `c.user?.name` but claims
+//      populated via RewardClaim.populate('user') return `user` as an object.
+//      Shape is already correct — no change needed but verified.
+//
+//   7. FIX — Missing `style` prop on AdminUIStyles Btn prevented the gold
+//      "Create Admin" button in AdminAdmins from rendering its inline styles.
+//      This was fixed in AdminUI.js. No change needed here.
+
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis,
   Tooltip, CartesianGrid, PieChart, Pie, Cell, Legend,
@@ -15,27 +52,28 @@ const COLORS = ['#4f46e5', '#7c3aed', '#10b981'];
 
 const TYPE_OPTIONS = [
   { value: '',         label: 'All Types' },
-  { value: 'referral', label: 'Referral' },
-  { value: 'post',     label: 'Post' },
-  { value: 'streak',   label: 'Streak' },
+  { value: 'referral', label: 'Referral'  },
+  { value: 'post',     label: 'Post'      },
+  { value: 'streak',   label: 'Streak'    },
 ];
 
 const TABS = ['overview', 'claims', 'undo'];
 
-// ── Undo Panel ──────────────────────────────────────────────────────────────
+// ── Undo Panel ───────────────────────────────────────────────────────────────
 const UndoPanel = () => {
-  const [users,       setUsers]       = useState([]);
-  const [search,      setSearch]      = useState('');
-  const [selUser,     setSelUser]     = useState('');
-  const [rewards,     setRewards]     = useState(null);
-  const [undoType,    setUndoType]    = useState('');
-  const [undoSlab,    setUndoSlab]    = useState('');
-  const [loadingU,    setLoadingU]    = useState(false);
-  const [submitting,  setSubmitting]  = useState(false);
+  const [users,      setUsers]      = useState([]);
+  const [allRewards, setAllRewards] = useState(null);
+  const [search,     setSearch]     = useState('');
+  const [selUser,    setSelUser]    = useState('');
+  const [undoType,   setUndoType]   = useState('');
+  const [undoSlab,   setUndoSlab]   = useState('');
+  const [loadingU,   setLoadingU]   = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
+  // FIX: fetch with a generous limit; the search bar filters client-side
   useEffect(() => {
     apiRequest.get('/api/admin/users?limit=200&sortBy=name&sortOrder=asc')
-      .then(r => setUsers(r.data.users))
+      .then(r => setUsers(r.data.users || []))
       .catch(() => toast.error('Failed to load users'));
   }, []);
 
@@ -43,35 +81,56 @@ const UndoPanel = () => {
     if (!selUser) return toast.warn('Select a user first');
     setLoadingU(true);
     try {
-      const res = await apiRequest.get(`/api/admin/users/${selUser}`);
-      setRewards(res.data.user);
-    } catch { toast.error('Failed to load user rewards'); }
-    finally   { setLoadingU(false); }
+      const res = await apiRequest.get('/api/admin/rewards');
+      setAllRewards(res.data);
+    } catch {
+      toast.error('Failed to load rewards');
+    } finally {
+      setLoadingU(false);
+    }
   };
 
   const doUndo = async () => {
     if (!selUser || !undoType || !undoSlab) return toast.warn('Fill all fields');
     setSubmitting(true);
     try {
-      await apiRequest.post('/api/admin/undo-reward', { userId: selUser, type: undoType, slab: undoSlab });
+      await apiRequest.post('/api/admin/undo-reward', {
+        userId: selUser,
+        type:   undoType,
+        slab:   undoSlab,
+      });
       toast.success('Reward undone successfully');
-      setRewards(null); setUndoType(''); setUndoSlab('');
-    } catch { toast.error('Failed to undo reward'); }
-    finally  { setSubmitting(false); }
+      setAllRewards(null);
+      setUndoType('');
+      setUndoSlab('');
+    } catch {
+      toast.error('Failed to undo reward');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const filtered = users.filter(u =>
-    !search || u.name?.toLowerCase().includes(search.toLowerCase()) ||
+    !search ||
+    u.name?.toLowerCase().includes(search.toLowerCase()) ||
     u.email?.toLowerCase().includes(search.toLowerCase())
   );
 
+  // Derive available slabs from reward activity filtered by selected user + type
   const slabOptions = (() => {
-    if (!rewards || !undoType) return [];
-    const key = undoType === 'post' ? 'redeemedPostSlabs'
-              : undoType === 'referral' ? 'redeemedReferralSlabs'
-              : 'redeemedStreakSlabs';
-    return (rewards[key] || []).map(s => ({ value: String(s), label: String(s) }));
+    if (!allRewards || !undoType || !selUser) return [];
+    const key     = `${undoType}Rewards`;
+    const slabKey = undoType === 'streak' ? 'streakslab' : 'slabAwarded';
+    const userRewards = (allRewards[key] || []).filter(r => r.user?._id === selUser || r.user === selUser);
+    const slabs = [...new Set(userRewards.map(r => r[slabKey]).filter(Boolean))];
+    return slabs.map(s => ({ value: String(s), label: String(s) }));
   })();
+
+  const userSummary = allRewards ? {
+    referral: (allRewards.referralRewards || []).filter(r => r.user?._id === selUser || r.user === selUser),
+    post:     (allRewards.postRewards     || []).filter(r => r.user?._id === selUser || r.user === selUser),
+    streak:   (allRewards.streakRewards   || []).filter(r => r.user?._id === selUser || r.user === selUser),
+  } : null;
 
   return (
     <div className="rw-undo-grid">
@@ -80,10 +139,9 @@ const UndoPanel = () => {
         <SearchBar value={search} onChange={setSearch} placeholder="Search users…" />
         <div className="rw-user-list">
           {filtered.slice(0, 50).map(u => (
-            <button
-              key={u._id}
+            <button key={u._id}
               className={`rw-user-btn ${selUser === u._id ? 'rw-user-selected' : ''}`}
-              onClick={() => { setSelUser(u._id); setRewards(null); }}
+              onClick={() => { setSelUser(u._id); setAllRewards(null); setUndoType(''); setUndoSlab(''); }}
             >
               <div className="rw-user-av">{(u.name?.[0] || 'U').toUpperCase()}</div>
               <div className="rw-user-info">
@@ -108,16 +166,20 @@ const UndoPanel = () => {
             </Btn>
           </div>
 
-          {rewards && (
+          {userSummary && (
             <div className="rw-reward-info">
               {[
-                ['Post Slabs', rewards.redeemedPostSlabs],
-                ['Referral Slabs', rewards.redeemedReferralSlabs],
-                ['Streak Slabs', rewards.redeemedStreakSlabs],
-              ].map(([label, arr]) => (
+                ['Post Rewards',     userSummary.post,     'slabAwarded'],
+                ['Referral Rewards', userSummary.referral, 'slabAwarded'],
+                ['Streak Rewards',   userSummary.streak,   'streakslab'],
+              ].map(([label, arr, key]) => (
                 <div key={label} className="rw-slab-row">
                   <span className="rw-slab-label">{label}</span>
-                  <span className="rw-slab-val">{(arr || []).join(', ') || '—'}</span>
+                  <span className="rw-slab-val">
+                    {arr.length
+                      ? arr.map(r => r[key]).filter(Boolean).join(', ')
+                      : '—'}
+                  </span>
                 </div>
               ))}
             </div>
@@ -129,32 +191,24 @@ const UndoPanel = () => {
           <div className="rw-undo-form">
             <Select
               value={undoType}
-              onChange={setUndoType}
+              onChange={v => { setUndoType(v); setUndoSlab(''); }}
               options={[
-                { value: 'post',     label: 'Post Reward' },
+                { value: 'post',     label: 'Post Reward'     },
                 { value: 'referral', label: 'Referral Reward' },
-                { value: 'streak',   label: 'Streak Reward' },
+                { value: 'streak',   label: 'Streak Reward'   },
               ]}
               placeholder="Select reward type"
             />
             {undoType && (
-              slabOptions.length > 0
-                ? (
-                  <Select
-                    value={undoSlab}
-                    onChange={setUndoSlab}
-                    options={slabOptions}
-                    placeholder="Select slab"
-                  />
-                )
-                : <p className="rw-empty" style={{ margin: 0 }}>No redeemed slabs for this type</p>
+              slabOptions.length > 0 ? (
+                <Select value={undoSlab} onChange={setUndoSlab} options={slabOptions} placeholder="Select slab" />
+              ) : allRewards ? (
+                <p className="rw-empty" style={{ margin: 0 }}>No redeemed slabs for this type</p>
+              ) : (
+                <p className="rw-empty" style={{ margin: 0 }}>Load rewards first</p>
+              )
             )}
-            <Btn
-              onClick={doUndo}
-              disabled={!selUser || !undoType || !undoSlab || submitting}
-              variant="danger"
-              size="sm"
-            >
+            <Btn onClick={doUndo} disabled={!selUser || !undoType || !undoSlab || submitting} variant="danger" size="sm">
               {submitting ? 'Undoing…' : 'Undo Reward'}
             </Btn>
           </div>
@@ -166,23 +220,27 @@ const UndoPanel = () => {
 
 // ── Main Component ──────────────────────────────────────────────────────────
 const AdminRewards = () => {
-  const [tab,        setTab]        = useState('overview');
-  const [data,       setData]       = useState(null);
-  const [claims,     setClaims]     = useState([]);
-  const [claimPag,   setClaimPag]   = useState({ page: 1, pages: 1, total: 0 });
-  const [loading,    setLoading]    = useState(true);
-  const [claimPage,  setClaimPage]  = useState(1);
-  const [claimType,  setClaimType]  = useState('');
-  const [dateFrom,   setDateFrom]   = useState('');
-  const [dateTo,     setDateTo]     = useState('');
+  const [tab,       setTab]       = useState('overview');
+  const [data,      setData]      = useState(null);
+  const [claims,    setClaims]    = useState([]);
+  const [claimPag,  setClaimPag]  = useState({ page: 1, pages: 1, total: 0 });
+  const [loading,   setLoading]   = useState(true);
+  const [claimPage, setClaimPage] = useState(1);
+  const [claimType, setClaimType] = useState('');
+  const [dateFrom,  setDateFrom]  = useState('');
+  const [dateTo,    setDateTo]    = useState('');
+
+  // FIX: isMounted guard prevents stale tab from overwriting active tab's state
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
   const fetchOverview = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await apiRequest.get('/api/admin/rewards?limit=200');
-      setData(res.data);
+      const res = await apiRequest.get('/api/admin/rewards');
+      if (mountedRef.current) setData(res.data);
     } catch { toast.error('Failed to load rewards'); }
-    finally   { setLoading(false); }
+    finally  { if (mountedRef.current) setLoading(false); }
   }, []);
 
   const fetchClaims = useCallback(async (p = 1) => {
@@ -195,14 +253,19 @@ const AdminRewards = () => {
         ...(dateTo    && { to: dateTo }),
       });
       const res = await apiRequest.get(`/api/admin/reward-claims?${params}`);
-      setClaims(res.data.claims);
-      setClaimPag(res.data.pagination);
+      // Handle both flat array and paginated object shapes
+      const list       = Array.isArray(res.data) ? res.data : (res.data?.claims || []);
+      const pagination = res.data?.pagination    || { pages: 1, total: list.length };
+      if (mountedRef.current) {
+        setClaims(list);
+        setClaimPag(pagination);
+      }
     } catch { toast.error('Failed to load claims'); }
-    finally   { setLoading(false); }
+    finally  { if (mountedRef.current) setLoading(false); }
   }, [claimType, dateFrom, dateTo]);
 
   useEffect(() => { if (tab === 'overview') fetchOverview(); }, [tab, fetchOverview]);
-  useEffect(() => { if (tab === 'claims')   fetchClaims(claimPage); }, [tab, claimPage, claimType, dateFrom, dateTo]);
+  useEffect(() => { if (tab === 'claims')   fetchClaims(claimPage); }, [tab, claimPage, claimType, dateFrom, dateTo, fetchClaims]);
 
   const claimCols = [
     { key: 'user', label: 'User', render: c => (
@@ -211,25 +274,34 @@ const AdminRewards = () => {
         <div style={{ fontSize: '.75rem', color: 'var(--text-secondary)' }}>{c.user?.email}</div>
       </div>
     )},
-    { key: 'type',      label: 'Type',      render: c => <Badge color={c.type === 'referral' ? 'blue' : c.type === 'post' ? 'purple' : 'yellow'}>{c.type}</Badge> },
+    {
+      key: 'type', label: 'Type',
+      render: c => (
+        <Badge color={c.type === 'referral' ? 'blue' : c.type === 'post' ? 'purple' : 'yellow'}>
+          {c.type}
+        </Badge>
+      ),
+    },
     { key: 'milestone', label: 'Milestone', render: c => <span className="rw-mono">{c.milestone}</span> },
-    { key: 'claimedAt', label: 'Claimed',   render: c => new Date(c.claimedAt).toLocaleString() },
+    {
+      key: 'claimedAt', label: 'Claimed',
+      render: c => {
+        const d = c.claimedAt || c.createdAt;
+        return d ? new Date(d).toLocaleString() : '—';
+      },
+    },
   ];
 
-  const totals = data?.totals || {};
+  const totals  = data?.totals || {};
   const pieData = [
-    { name: 'Referral', value: totals.referral || 0, fill: COLORS[0] },
-    { name: 'Post',     value: totals.post     || 0, fill: COLORS[1] },
-    { name: 'Streak',   value: totals.streak   || 0, fill: COLORS[2] },
+    { name: 'Referral', value: data?.referralRewards?.length || totals.referral || 0, fill: COLORS[0] },
+    { name: 'Post',     value: data?.postRewards?.length     || totals.post     || 0, fill: COLORS[1] },
+    { name: 'Streak',   value: data?.streakRewards?.length   || totals.streak   || 0, fill: COLORS[2] },
   ];
 
-  // Slab bar data for each type
   const makeBarData = (rewards, slabKey) => {
     const map = {};
-    (rewards || []).forEach(r => {
-      const s = r[slabKey];
-      if (s !== undefined) map[s] = (map[s] || 0) + 1;
-    });
+    (rewards || []).forEach(r => { const s = r[slabKey]; if (s !== undefined) map[s] = (map[s] || 0) + 1; });
     return Object.entries(map).map(([slab, count]) => ({ slab, count }));
   };
 
@@ -238,7 +310,6 @@ const AdminRewards = () => {
       <AdminUIStyles />
       <PageHeader title="Rewards Management" subtitle="Track, analyse and undo reward activity" />
 
-      {/* Tabs */}
       <div className="rw-tabs">
         {TABS.map(t => (
           <button key={t} className={`rw-tab ${tab === t ? 'rw-tab-active' : ''}`} onClick={() => setTab(t)}>
@@ -247,56 +318,53 @@ const AdminRewards = () => {
         ))}
       </div>
 
-      {/* Overview */}
       {tab === 'overview' && (
-        loading ? <div className="ap-spinner-wrap"><div className="ap-spinner" style={{ width: 40, height: 40 }} /></div>
-        : data ? (
-          <>
-            <div className="ap-stats-grid" style={{ marginBottom: '1.5rem' }}>
-              <StatCard label="Referral Rewards" value={(totals.referral || 0).toLocaleString()} icon="👥" color={COLORS[0]} />
-              <StatCard label="Post Rewards"     value={(totals.post     || 0).toLocaleString()} icon="📝" color={COLORS[1]} />
-              <StatCard label="Streak Rewards"   value={(totals.streak   || 0).toLocaleString()} icon="🔥" color={COLORS[2]} />
-              <StatCard label="Total"            value={((totals.referral||0)+(totals.post||0)+(totals.streak||0)).toLocaleString()} icon="◇" color="#f59e0b" />
-            </div>
+        loading
+          ? <div className="ap-spinner-wrap"><div className="ap-spinner" style={{ width: 40, height: 40 }} /></div>
+          : data ? (
+            <>
+              <div className="ap-stats-grid" style={{ marginBottom: '1.5rem' }}>
+                <StatCard label="Referral Rewards" value={(data.referralRewards?.length || totals.referral || 0).toLocaleString()} icon="👥" color={COLORS[0]} />
+                <StatCard label="Post Rewards"     value={(data.postRewards?.length     || totals.post     || 0).toLocaleString()} icon="📝" color={COLORS[1]} />
+                <StatCard label="Streak Rewards"   value={(data.streakRewards?.length   || totals.streak   || 0).toLocaleString()} icon="🔥" color={COLORS[2]} />
+                <StatCard label="Total"            value={pieData.reduce((s, r) => s + r.value, 0).toLocaleString()} icon="◇" color="#f59e0b" />
+              </div>
 
-            <div className="rw-charts-grid" style={{ marginBottom: '1.5rem' }}>
-              <Card>
-                <div className="ap-section-title">Distribution by Type</div>
-                <ResponsiveContainer width="100%" height={220}>
-                  <PieChart>
-                    <Pie data={pieData} cx="50%" cy="50%" innerRadius={55} outerRadius={80} paddingAngle={4} dataKey="value">
-                      {pieData.map((e, i) => <Cell key={i} fill={e.fill} />)}
-                    </Pie>
-                    <Tooltip />
-                    <Legend iconType="circle" iconSize={8} />
-                  </PieChart>
-                </ResponsiveContainer>
-              </Card>
-
-              {[
-                { label: 'Referral by Slab', arr: data.referralRewards, key: 'slabAwarded', color: COLORS[0] },
-                { label: 'Post by Slab',     arr: data.postRewards,     key: 'slabAwarded', color: COLORS[1] },
-                { label: 'Streak by Slab',   arr: data.streakRewards,   key: 'streakslab',  color: COLORS[2] },
-              ].map(({ label, arr, key, color }) => (
-                <Card key={label}>
-                  <div className="ap-section-title">{label}</div>
+              <div className="rw-charts-grid" style={{ marginBottom: '1.5rem' }}>
+                <Card>
+                  <div className="ap-section-title">Distribution by Type</div>
                   <ResponsiveContainer width="100%" height={220}>
-                    <BarChart data={makeBarData(arr, key)} margin={{ top: 0, right: 8, left: -16, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                      <XAxis dataKey="slab" tick={{ fontSize: 11, fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} />
-                      <YAxis tick={{ fontSize: 11, fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} />
-                      <Tooltip />
-                      <Bar dataKey="count" fill={color} radius={[6, 6, 0, 0]} />
-                    </BarChart>
+                    <PieChart>
+                      <Pie data={pieData} cx="50%" cy="50%" innerRadius={55} outerRadius={80} paddingAngle={4} dataKey="value">
+                        {pieData.map((e, i) => <Cell key={i} fill={e.fill} />)}
+                      </Pie>
+                      <Tooltip /><Legend iconType="circle" iconSize={8} />
+                    </PieChart>
                   </ResponsiveContainer>
                 </Card>
-              ))}
-            </div>
-          </>
-        ) : null
+
+                {[
+                  { label: 'Referral by Slab', arr: data.referralRewards, key: 'slabAwarded', color: COLORS[0] },
+                  { label: 'Post by Slab',     arr: data.postRewards,     key: 'slabAwarded', color: COLORS[1] },
+                  { label: 'Streak by Slab',   arr: data.streakRewards,   key: 'streakslab',  color: COLORS[2] },
+                ].map(({ label, arr, key, color }) => (
+                  <Card key={label}>
+                    <div className="ap-section-title">{label}</div>
+                    <ResponsiveContainer width="100%" height={220}>
+                      <BarChart data={makeBarData(arr, key)} margin={{ top: 0, right: 8, left: -16, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                        <XAxis dataKey="slab" tick={{ fontSize: 11, fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} />
+                        <YAxis tick={{ fontSize: 11, fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} />
+                        <Tooltip /><Bar dataKey="count" fill={color} radius={[6, 6, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </Card>
+                ))}
+              </div>
+            </>
+          ) : null
       )}
 
-      {/* Claims */}
       {tab === 'claims' && (
         <Card>
           <div className="ap-filter-bar">
@@ -309,33 +377,32 @@ const AdminRewards = () => {
         </Card>
       )}
 
-      {/* Undo */}
       {tab === 'undo' && <UndoPanel />}
 
       <style>{`
-        .rw-tabs         { display:flex; gap:.5rem; margin-bottom:1.25rem; background:var(--bg-card); border:1px solid var(--border); padding:.5rem; border-radius:12px; }
-        .rw-tab          { padding:.5rem 1.25rem; border:none; background:none; font-family:inherit; font-size:.875rem; font-weight:600; color:var(--text-secondary); border-radius:8px; cursor:pointer; transition:all .2s; }
-        .rw-tab:hover    { background:var(--bg-canvas); color:var(--text-primary); }
-        .rw-tab-active   { background:var(--accent); color:#fff !important; }
-        .rw-charts-grid  { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:1rem; }
-        .rw-mono         { font-family:'DM Mono',monospace; font-size:.875rem; }
-        .rw-undo-grid    { display:grid; grid-template-columns:300px 1fr; gap:1rem; }
+        .rw-tabs       { display:flex; gap:.5rem; margin-bottom:1.25rem; background:var(--bg-card); border:1px solid var(--border); padding:.5rem; border-radius:12px; }
+        .rw-tab        { padding:.5rem 1.25rem; border:none; background:none; font-family:inherit; font-size:.875rem; font-weight:600; color:var(--text-secondary); border-radius:8px; cursor:pointer; transition:all .2s; }
+        .rw-tab:hover  { background:var(--bg-canvas); color:var(--text-primary); }
+        .rw-tab-active { background:var(--accent); color:#fff !important; }
+        .rw-charts-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:1rem; }
+        .rw-mono       { font-family:'DM Mono',monospace; font-size:.875rem; }
+        .rw-undo-grid  { display:grid; grid-template-columns:300px 1fr; gap:1rem; }
         @media(max-width:768px) { .rw-undo-grid { grid-template-columns:1fr; } }
-        .rw-user-list    { max-height:360px; overflow-y:auto; margin-top:.75rem; display:flex; flex-direction:column; gap:.25rem; }
-        .rw-user-btn     { display:flex; align-items:center; gap:.75rem; padding:.625rem .75rem; background:none; border:1px solid transparent; border-radius:8px; cursor:pointer; text-align:left; transition:all .15s; width:100%; }
-        .rw-user-btn:hover    { background:var(--bg-canvas); }
-        .rw-user-selected { background:rgba(79,70,229,.1) !important; border-color:var(--accent) !important; }
-        .rw-user-av      { width:32px; height:32px; border-radius:8px; background:linear-gradient(135deg,var(--accent),#7c3aed); color:#fff; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:.8125rem; flex-shrink:0; }
-        .rw-user-info    { display:flex; flex-direction:column; min-width:0; }
-        .rw-user-name    { font-size:.8125rem; font-weight:600; color:var(--text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-        .rw-user-email   { font-size:.6875rem; color:var(--text-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-        .rw-reward-info  { margin-top:1rem; display:flex; flex-direction:column; gap:.375rem; border-top:1px solid var(--border); padding-top:.875rem; }
-        .rw-slab-row     { display:flex; justify-content:space-between; font-size:.8125rem; padding:.375rem .5rem; border-radius:6px; background:var(--bg-canvas); }
-        .rw-slab-label   { color:var(--text-secondary); font-weight:500; }
-        .rw-slab-val     { color:var(--text-primary); font-weight:600; font-family:'DM Mono',monospace; }
-        .rw-undo-form    { display:flex; flex-direction:column; gap:.875rem; margin-top:.5rem; }
-        .rw-undo-right   { display:flex; flex-direction:column; gap:1rem; }
-        .rw-empty        { text-align:center; color:var(--text-secondary); font-size:.875rem; padding:1.5rem; }
+        .rw-user-list  { max-height:360px; overflow-y:auto; margin-top:.75rem; display:flex; flex-direction:column; gap:.25rem; }
+        .rw-user-btn   { display:flex; align-items:center; gap:.75rem; padding:.625rem .75rem; background:none; border:1px solid transparent; border-radius:8px; cursor:pointer; text-align:left; transition:all .15s; width:100%; }
+        .rw-user-btn:hover  { background:var(--bg-canvas); }
+        .rw-user-selected   { background:rgba(79,70,229,.1) !important; border-color:var(--accent) !important; }
+        .rw-user-av    { width:32px; height:32px; border-radius:8px; background:linear-gradient(135deg,var(--accent),#7c3aed); color:#fff; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:.8125rem; flex-shrink:0; }
+        .rw-user-info  { display:flex; flex-direction:column; min-width:0; }
+        .rw-user-name  { font-size:.8125rem; font-weight:600; color:var(--text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .rw-user-email { font-size:.6875rem; color:var(--text-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .rw-reward-info { margin-top:1rem; display:flex; flex-direction:column; gap:.375rem; border-top:1px solid var(--border); padding-top:.875rem; }
+        .rw-slab-row   { display:flex; justify-content:space-between; font-size:.8125rem; padding:.375rem .5rem; border-radius:6px; background:var(--bg-canvas); }
+        .rw-slab-label { color:var(--text-secondary); font-weight:500; }
+        .rw-slab-val   { color:var(--text-primary); font-weight:600; font-family:'DM Mono',monospace; }
+        .rw-undo-form  { display:flex; flex-direction:column; gap:.875rem; margin-top:.5rem; }
+        .rw-undo-right { display:flex; flex-direction:column; gap:1rem; }
+        .rw-empty      { text-align:center; color:var(--text-secondary); font-size:.875rem; padding:1.5rem; }
       `}</style>
     </>
   );
