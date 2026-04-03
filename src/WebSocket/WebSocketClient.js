@@ -1,213 +1,201 @@
-import { io } from 'socket.io-client';
+import { io } from "socket.io-client";
 
+/* ─────────────────────────────────────────────
+   CONFIG
+───────────────────────────────────────────── */
+const SERVER_URL =
+  process.env.REACT_APP_SERVER_URL || "http://127.0.0.1:5000";
+
+/* ─────────────────────────────────────────────
+   STATE
+───────────────────────────────────────────── */
 let socket = null;
-let reconnectAttempts = 0;
-let reconnectTimer = null;
+const listeners = {};
 
-const SERVER_URL = process.env.REACT_APP_SERVER_URL || "http://127.0.0.1:5000";
-
+/* ─────────────────────────────────────────────
+   TOKEN HELPERS
+───────────────────────────────────────────── */
 const getToken = () => {
-  const rawToken = localStorage.getItem("token");
-  return rawToken ? rawToken.trim().replace(/\s/g, '') : null;
+  const raw = localStorage.getItem("token");
+  return raw ? raw.trim().replace(/\s/g, "") : null;
 };
-// console.log("🧪 Raw token:", JSON.stringify(token));
 
-// const refreshToken = async () => {
-//   const token = localStorage.getItem('token');
+const refreshToken = async () => {
+  const token = getToken();
+  if (!token) return null;
 
-//   // 🚫 If token is missing, don't even try
-//   if (!token) {
-//     console.warn("⚠️ Cannot refresh: no token in localStorage");
-//     return null;
-//   }
+  try {
+    const res = await fetch(`${SERVER_URL}/api/auth/refresh-token`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    });
 
-//   try {
-//     const res = await fetch(`${SERVER_URL}/api/auth/refresh-token`, {
-//       method: 'POST',
-//       credentials: 'include',
-//       headers: {
-//         'Content-Type': 'application/json',
-//         'Authorization': `Bearer ${token}`,
-//       },
-//     });
+    const data = await res.json();
 
-//     const data = await res.json();
-//     if (res.ok && data?.token) {
-//       localStorage.setItem('token', data.token);
-//       console.log("🔁 Token refreshed successfully");
-//       return data.token;
-//     } else {
-//       console.warn("🚫 Token refresh failed", data?.message || '');
-//       return null;
-//     }
-//   } catch (err) {
-//     console.error("❌ Error refreshing token:", err);
-//     return null;
-//   }
-// };
+    if (res.ok && data?.token) {
+      localStorage.setItem("token", data.token);
+      console.log("🔁 Token refreshed");
+      return data.token;
+    }
 
+    return null;
+  } catch (err) {
+    console.error("❌ Token refresh failed:", err);
+    return null;
+  }
+};
+
+/* ─────────────────────────────────────────────
+   INITIALIZE SOCKET
+───────────────────────────────────────────── */
 export const initializeSocket = async () => {
   const token = getToken();
 
-  if (!token || token.split('.').length !== 3) {
-    console.warn("🚫 Invalid or missing token. Cannot initialize socket.");
+  if (!token || token.split(".").length !== 3) {
+    console.warn("🚫 Invalid token. Socket not initialized.");
     return null;
   }
-
-  // console.log("📤 Sending cleaned token:", JSON.stringify(token));
 
   if (socket) return socket;
 
   socket = io(SERVER_URL, {
-    withCredentials: false, // ❌ No cookies needed
     path: "/socket.io",
     transports: ["websocket"],
     autoConnect: false,
-    reconnection: false,
+    reconnection: true,
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 30000,
     auth: { token },
   });
 
-  attachDefaultListeners(socket);
+  attachListeners(socket);
   socket.connect();
 
   return socket;
 };
 
-const attachDefaultListeners = (sock) => {
-  sock.off(); // Clear all previous listeners
+/* ─────────────────────────────────────────────
+   CORE LISTENERS
+───────────────────────────────────────────── */
+const attachListeners = (sock) => {
+  sock.off(); // clear previous
 
-  sock.on('connect', () => {
-    console.log('✅ Socket connected:', sock.id);
-    reconnectAttempts = 0;
-    clearTimeout(reconnectTimer);
+  sock.on("connect", () => {
+    console.log("✅ Connected:", sock.id);
   });
 
-  sock.on('disconnect', (reason) => {
-    console.warn(`⛔ Socket disconnected. Reason: ${reason}`);
-    if (reason === "io server disconnect") {
-      console.warn("🛑 Disconnected by server. Re-authentication might be required.");
-    } else if (reason === "transport close") {
-      console.warn("🔌 Network or tab closed.");
-    } else if (reason === "ping timeout") {
-      console.warn("⏱️ Ping timeout — possible lost connection.");
-    }
-    attemptReconnection();
+  sock.on("disconnect", (reason) => {
+    console.warn("⛔ Disconnected:", reason);
   });
 
-  sock.on('connect_error', (err) => {
-    console.error('❌ Socket connection error:', err.message);
-    attemptReconnection();
-  });
+  /* ── AUTH ERROR HANDLING ── */
+  sock.on("connect_error", async (err) => {
+    console.warn("⚠️ Socket error:", err.message);
 
-  sock.on("online-users", (userIds) => {
-    console.log("👥 Online users list updated:", userIds);
-  });
+    if (err.message === "jwt expired") {
+      const newToken = await refreshToken();
 
-  sock.on('notification', (payload) => {
-    try {
-      if (document.visibilityState === 'hidden' &&
-        'Notification' in window &&
-        Notification.permission === 'granted') {
-        new Notification(payload.title || 'Notification', {
-          body: payload.message || '',
-          data: { url: payload.url || '/' }
-        });
+      if (newToken) {
+        sock.auth = { token: newToken };
+        sock.connect();
+      } else {
+        console.warn("🔒 Session expired. Logging out.");
+        localStorage.removeItem("token");
+        window.location.href = "/login";
       }
-    } catch (e) {
-      console.warn('Notification API failed:', e);
     }
   });
 
-  // Log every socket event
+  /* ── DOMAIN EVENTS ── */
+  sock.on("user:online", (data) => emitToSubscribers("user:online", data));
+
+  sock.on("reward:updated", (data) =>
+    emitToSubscribers("reward:updated", data)
+  );
+
+  sock.on("admin:notification", (payload) => {
+    // Global UI event
+    window.dispatchEvent(
+      new CustomEvent("app:notification", { detail: payload })
+    );
+
+    emitToSubscribers("admin:notification", payload);
+  });
+
+  /* ── DEBUG LOGGER ── */
   sock.onAny((event, ...args) => {
-    console.debug(`📨 Socket event: ${event}`, args);
+    console.debug("📨", event, args);
   });
 };
 
-const attemptReconnection = () => {
-  const token = getToken();
+/* ─────────────────────────────────────────────
+   SUBSCRIPTION SYSTEM (EVENT BUS)
+───────────────────────────────────────────── */
+export const subscribe = (event, callback) => {
+  if (!listeners[event]) listeners[event] = [];
+  listeners[event].push(callback);
 
-  if (!token) {
-    console.warn("🛑 Stopping reconnection: no token (user likely logged out)");
+  return () => {
+    listeners[event] = listeners[event].filter((cb) => cb !== callback);
+  };
+};
+
+const emitToSubscribers = (event, payload) => {
+  listeners[event]?.forEach((cb) => cb(payload));
+};
+
+/* ─────────────────────────────────────────────
+   EMIT HELPERS
+───────────────────────────────────────────── */
+export const emitEvent = (event, payload = {}, cb) => {
+  if (!socket || !socket.connected) {
+    console.warn(`⚠️ Cannot emit '${event}' — socket not ready`);
     return;
   }
 
-  reconnectAttempts++;
-  const delay = Math.min(1000 * 2 ** reconnectAttempts, 30000); // exponential backoff
-
-  reconnectTimer = setTimeout(async () => {
-    console.log(`🔁 Retrying socket connection #${reconnectAttempts}...`);
-    if (!socket) {
-      await initializeSocket();
-    } else {
-      socket.auth = { token };
-      attachDefaultListeners(socket);
-      socket.connect();
-    }
-  }, delay);
+  socket.emit(event, payload, cb);
 };
 
+/* ─────────────────────────────────────────────
+   UTILITIES
+───────────────────────────────────────────── */
+export const getSocket = () => socket;
+
+export const isSocketReady = () =>
+  !!(socket && socket.connected);
+
+/* ─────────────────────────────────────────────
+   RECONNECT
+───────────────────────────────────────────── */
 export const reconnectSocket = async () => {
   const token = getToken();
 
   if (!token) {
-    console.warn("🚫 Cannot reconnect: token missing");
+    console.warn("🚫 No token — cannot reconnect");
     return;
   }
 
   if (socket) {
     socket.auth = { token };
-    if (!socket.connected && typeof socket.connect === 'function') {
-      console.log("🔄 Reconnecting existing socket...");
-      socket.connect();
-    }
+    if (!socket.connected) socket.connect();
   } else {
-    console.log("🆕 Initializing new socket...");
     await initializeSocket();
   }
 };
 
-export const getSocket = () => socket;
-
-export const isSocketReady = () => !!(socket && socket.connected);
-
-export const safeEmit = (eventName, payload = {}, callback) => {
-  const sock = getSocket();
-  if (!sock || !sock.connected) {
-    console.warn(`⚠️ Socket not connected. Cannot emit '${eventName}'`);
-    return;
-  }
-  if (typeof callback === 'function') {
-    sock.emit(eventName, payload, callback);
-  } else {
-    sock.emit(eventName, payload);
-  }
-};
-
-export const emitEvent = (eventName, payload = {}, callback) => {
-  if (!socket || !socket.connected) {
-    console.warn(`⚠️ Cannot emit '${eventName}': socket not connected`);
-    return;
-  }
-
-  if (typeof callback === 'function') {
-    socket.emit(eventName, payload, callback);
-  } else {
-    socket.emit(eventName, payload);
-  }
-};
-
+/* ─────────────────────────────────────────────
+   DISCONNECT
+───────────────────────────────────────────── */
 export const disconnectSocket = () => {
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = null;
-  }
-
   if (socket) {
-    socket.off();
+    socket.removeAllListeners();
     socket.disconnect();
     socket = null;
-    console.log("🔌 Socket manually disconnected");
+    console.log("🔌 Socket disconnected");
   }
 };
 

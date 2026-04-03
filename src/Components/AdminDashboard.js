@@ -1,27 +1,14 @@
 // Components/AdminDashboard.js
 //
-// CHANGES FROM ORIGINAL:
+// CHANGES FROM PREVIOUS VERSION:
 //
-//   1. CRITICAL — `t[tab.labelKey]` always undefined because tab objects had
-//      `label` but not `labelKey`. The template read `t[tab.labelKey] ?? tab.labelKey`
-//      which always fell through to `tab.labelKey` which was also undefined,
-//      rendering nothing. Fixed: use `tab.label` directly (the string is already
-//      translated at definition time via `t.*`).
+//   1. useI18nTheme() → useI18n(). This component never used darkMode or
+//      setDarkMode, so it only needs the translation hook. Importing the
+//      combined hook would still work (thanks to the shim), but using the
+//      focused hook is cleaner and avoids an unnecessary context subscription.
 //
-//   2. CRITICAL — `tab.icon` was referenced in JSX as `<span>{tab.icon}</span>`
-//      but the tab objects in the array never had an `icon` property defined.
-//      The span rendered empty. Fixed: icons are now part of each tab object.
-//
-//   3. FIX — `useAdminAuth` imported from AdminAuthContext. Per the previous
-//      batch fix, AdminAuthContext now delegates to PermissionsContext. The
-//      import still works but `usePermissions` from PermissionsContext is the
-//      canonical hook going forward. Migrated here.
-//
-//   4. FIX — Active tab defaulted to "rewards" even when the admin doesn't have
-//      `view_rewards`. Now defaults to the first tab the admin can actually see.
-//
-//   5. MINOR — KYC tab added for admins with `view_users` permission, linking
-//      to the new AdminKycDashboard embedded view.
+//   All other fixes (tab.label, tab.icon, permission-aware default tab,
+//   KYC tab, deduplicated tabs, loading/empty states) are retained unchanged.
 
 import React, { useState, useMemo } from 'react';
 import AdminRewardDashboard from './AdminRewardDashboard';
@@ -29,15 +16,15 @@ import AdminRewardUndoPanel from './AdminRewardUndoPanel';
 import ClaimDashboard       from './ClaimDashboard';
 import AdminUserReport      from './UserReport';
 import AdminKycDashboard    from './KYC/AdminKycDashboard';
-import { useI18nTheme }     from '../Context/I18nThemeContext';
+import { useI18n }          from '../Context/I18nContext';
 import { usePermissions }   from '../Context/PermissionsContext';
 
 const AdminDashboard = () => {
-  const { t }                                       = useI18nTheme();
-  const { hasPermission, isSuperAdmin, loading }    = usePermissions();
+  const { t }                                    = useI18n();
+  const { hasPermission, isSuperAdmin, loading } = usePermissions();
 
-  // FIX: compute tabs after permissions load so we don't default to a tab
-  //      the admin cannot see
+  // Build tabs after permissions load so we don't default to a tab the admin
+  // cannot see
   const tabs = useMemo(() => {
     const all = [
       hasPermission('view_rewards')          && { id: 'rewards', icon: '🎁', label: t.rewards          || 'Rewards' },
@@ -45,18 +32,19 @@ const AdminDashboard = () => {
       hasPermission('approve_reward_claims') && { id: 'claims',  icon: '✅', label: t.claims           || 'Claims' },
       hasPermission('view_reports')          && { id: 'report',  icon: '📊', label: t.reports          || 'Reports' },
       hasPermission('view_users')            && { id: 'kyc',     icon: '🪪', label: t.kycReview        || 'KYC Review' },
-      isSuperAdmin                           && { id: 'rewards', icon: '🎁', label: t.rewards          || 'Rewards' }, // always visible to super
+      // Super admins always see rewards
+      isSuperAdmin                           && { id: 'rewards', icon: '🎁', label: t.rewards          || 'Rewards' },
     ].filter(Boolean);
 
-    // Deduplicate by id (isSuperAdmin may duplicate 'rewards')
-    return all.filter((tab, idx, arr) => arr.findIndex(t => t.id === tab.id) === idx);
+    // Deduplicate by id
+    return all.filter((tab, idx, arr) => arr.findIndex(x => x.id === tab.id) === idx);
   }, [hasPermission, isSuperAdmin, t]);
 
-  // FIX: default to first available tab, not hardcoded 'rewards'
+  // Default to first available tab
   const [activeTab, setActiveTab] = useState(() => tabs[0]?.id || 'rewards');
 
   // Keep activeTab valid if tabs change after permission load
-  const validTab = tabs.find(t => t.id === activeTab) ? activeTab : tabs[0]?.id || 'rewards';
+  const validTab = tabs.find(x => x.id === activeTab) ? activeTab : tabs[0]?.id || 'rewards';
 
   if (loading) {
     return (
@@ -94,9 +82,7 @@ const AdminDashboard = () => {
             className={`tab-button ${validTab === tab.id ? 'active' : ''}`}
             onClick={() => setActiveTab(tab.id)}
           >
-            {/* FIX: tab.icon now exists on the object */}
             <span aria-hidden="true">{tab.icon}</span>
-            {/* FIX: use tab.label directly, not t[tab.labelKey] */}
             {tab.label}
           </button>
         ))}

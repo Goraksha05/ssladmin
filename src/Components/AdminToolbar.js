@@ -4,6 +4,8 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useI18nTheme, LANGUAGES } from '../Context/I18nThemeContext';
+// import NotificationBell from "../Components/Notification/NotificationBell";
+// import NotificationDropdown from "../Components/Notification/NotificationDropdown";
 
 const AdminToolbar = () => {
   const { lang, setLang, darkMode, setDarkMode, t } = useI18nTheme();
@@ -64,6 +66,11 @@ const AdminToolbar = () => {
           )}
         </div>
 
+        {/* <div className="relative">
+          <NotificationBell onClick={() => setOpen(!open)} />
+          {open && <NotificationDropdown />}
+        </div> */}
+
         {/* Theme toggle */}
         <button
           className="theme-btn"
@@ -74,13 +81,13 @@ const AdminToolbar = () => {
           {darkMode ? (
             /* Sun icon — clicking switches to light */
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-              <circle cx="12" cy="12" r="5"/>
-              <path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+              <circle cx="12" cy="12" r="5" />
+              <path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
             </svg>
           ) : (
             /* Moon icon — clicking switches to dark */
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
             </svg>
           )}
           <span className="theme-label">{darkMode ? t.lightMode : t.darkMode}</span>

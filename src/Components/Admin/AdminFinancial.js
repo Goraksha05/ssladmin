@@ -6,13 +6,10 @@ import {
 } from 'recharts';
 import apiRequest from '../../utils/apiRequest';
 import { toast } from 'react-toastify';
-import * as XLSX from 'xlsx';
-import { saveAs } from 'file-saver';
-import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import { exportCSV, exportExcel, exportPDF } from '../../utils/adminExport';
 import {
   PageHeader, Card, StatCard, Btn, Badge, Select,
-  Table, Pagination, DateRangeFilter, AdminUIStyles,
+  Table, Pagination, DateRangeFilter,
 } from './AdminUI';
 
 const PLAN_OPTIONS = [
@@ -28,45 +25,6 @@ const PLAN_COLORS = {
   Basic: '#10b981', Silver: '#94a3b8', Standard: '#4f46e5',
   Gold: '#f59e0b', Premium: '#7c3aed',
 };
-
-function exportExcel(rows, name) {
-  if (!rows.length) return toast.warn('No data');
-  const ws = XLSX.utils.json_to_sheet(rows);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, name);
-  XLSX.writeFile(wb, `${name}_${Date.now()}.xlsx`);
-  toast.success('Excel exported');
-}
-
-function exportCSV(rows, name) {
-  if (!rows.length) return toast.warn('No data');
-  const headers = Object.keys(rows[0]);
-  const csv = [
-    headers.join(','),
-    ...rows.map(r => headers.map(h => `"${String(r[h] ?? '').replace(/"/g, '""')}"`).join(',')),
-  ].join('\n');
-  saveAs(new Blob([csv], { type: 'text/csv;charset=utf-8;' }), `${name}_${Date.now()}.csv`);
-  toast.success('CSV exported');
-}
-
-function exportPDF(rows, name) {
-  if (!rows.length) return toast.warn('No data');
-  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-  doc.setFontSize(14);
-  doc.text(name, 14, 16);
-  doc.setFontSize(9);
-  doc.text(`Generated: ${new Date().toLocaleString()}`, 14, 22);
-  const cols = Object.keys(rows[0]);
-  doc.autoTable({
-    startY: 28,
-    head: [cols],
-    body: rows.map(r => cols.map(c => String(r[c] ?? ''))),
-    styles: { fontSize: 7, cellPadding: 2 },
-    headStyles: { fillColor: [79, 70, 229] },
-  });
-  doc.save(`${name}_${Date.now()}.pdf`);
-  toast.success('PDF exported');
-}
 
 const AdminFinancial = () => {
   const [records,    setRecords]    = useState([]);
@@ -147,7 +105,6 @@ const AdminFinancial = () => {
 
   return (
     <>
-      <AdminUIStyles />
       <PageHeader
         title="Financial Management"
         subtitle="Subscriptions, payments and bank details"

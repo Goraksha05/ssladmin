@@ -1,53 +1,30 @@
 // Components/AdminLayout.js
 //
-// CHANGES FROM ORIGINAL:
+// CHANGES FROM PREVIOUS VERSION:
 //
-//   1. FIX — window.innerWidth used inside render (SSR-unsafe + stale on resize).
-//      The original used `window.innerWidth >= 768` directly in useState
-//      initialiser and in the inline conditional for the mobile overlay. Both
-//      are fine in a pure CRA/SPA context but the overlay condition
-//      `{sidebarOpen && window.innerWidth < 768 && ...}` never re-evaluated on
-//      resize. Fixed with a `useWindowWidth` hook that subscribes to the resize
-//      event, and the sidebarOpen default is now also responsive.
+//   1. SPLIT CONTEXTS — useI18nTheme() replaced with focused hooks.
+//      useThemeMode() import also removed — AdminToolbar owns the toggle now.
 //
-//   2. FIX — AdminUIStyles not rendered in AdminLayoutInner. The layout shell
-//      provides the :root CSS variable definitions via AdminUIStyles. Without
-//      this, any admin page that does NOT render its own AdminUIStyles (e.g.,
-//      a custom page added later) would have unstyled CSS variables. Adding
-//      AdminUIStyles at the layout level means it runs once for the whole panel.
+//   2. Inline theme-toggle button replaced with <AdminToolbar />.
+//      AdminToolbar provides both the language picker and the dark/light
+//      toggle, reading directly from I18nContext and ThemeModeContext.
+//      The duplicate SVG toggle code and setDarkMode call are gone.
 //
-//   3. FIX — --shadow-pop was referenced by modal components nested under the
-//      layout but the variable wasn't defined anywhere accessible. Now defined
-//      in AdminUI.js :root block; the layout just needs AdminUIStyles present.
-//
-//   4. FIX — I18nThemeProvider wrapping: if this context doesn't exist yet it
-//      would crash the entire admin panel. Wrapped in try-import pattern with
-//      a fallback fragment. Note: if I18nThemeProvider is always available,
-//      no change in behaviour.
-//
-//   5. MINOR — activeId computation: the `.find()` could return undefined when
-//      the current path doesn't match any nav item (e.g., /admin/create-admin
-//      while it's superOnly and the user is not super_admin). Added safe
-//      fallback to empty string rather than 'dashboard' to avoid false highlights.
+//   3. All other fixes (useWindowWidth, AdminUIStyles, isMobile reactive
+//      overlay, activeId safe fallback, no I18nThemeProvider re-wrap) retained.
 
 import React, { useState, useEffect } from 'react';
+import { toast } from "react-toastify";
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../Context/AuthContext';
 import { PermissionsProvider, usePermissions } from '../Context/PermissionsContext';
 import Logo from './XLogo/Logo';
 import { AdminUIStyles } from './Admin/AdminUI';
+import AdminToolbar from './AdminToolbar';
 import './AdminLayout.css';
 
-// Attempt to import I18nThemeProvider — graceful fallback if not yet created
-let I18nThemeProvider;
-try {
-  I18nThemeProvider = require('../Context/I18nThemeContext').I18nThemeProvider;
-} catch {
-  I18nThemeProvider = ({ children }) => <>{children}</>;
-}
 
-
-// FIX: responsive window width hook — avoids stale window.innerWidth in render
+// FIX: responsive window-width hook — avoids stale window.innerWidth in render
 function useWindowWidth() {
   const [width, setWidth] = useState(
     typeof window !== 'undefined' ? window.innerWidth : 1024
@@ -61,30 +38,33 @@ function useWindowWidth() {
 }
 
 const AdminLayoutInner = () => {
-  const { user, logout }                       = useAuth();
+  const { user, logout } = useAuth();
   const { hasPermission, isSuperAdmin, adminRoleName } = usePermissions();
-  const navigate  = useNavigate();
-  const location  = useLocation();
-  const width     = useWindowWidth();
-  const isMobile  = width < 768;
+  const navigate = useNavigate();
+  const location = useLocation();
+  const width = useWindowWidth();
+  const isMobile = width < 768;
 
   const [sidebarOpen, setSidebarOpen] = useState(() =>
     (typeof window !== 'undefined' ? window.innerWidth : 1024) >= 768
       ? true
       : localStorage.getItem('adminSidebarOpen') === 'true'
   );
-  const [darkMode, setDarkMode] = useState(() =>
-    localStorage.getItem('adminDarkMode') === 'true'
-  );
+
+  // 🔥 GLOBAL NOTIFICATION HANDLER
+  useEffect(() => {
+    const handler = (e) => {
+      const id = e.detail?.id || e.detail?.message;
+      toast.info(e.detail?.message || "New notification", { toastId: id });
+    };
+
+    window.addEventListener("app:notification", handler);
+    return () => window.removeEventListener("app:notification", handler);
+  }, []);
 
   useEffect(() => {
     localStorage.setItem('adminSidebarOpen', sidebarOpen);
   }, [sidebarOpen]);
-
-  useEffect(() => {
-    localStorage.setItem('adminDarkMode', darkMode);
-    document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
-  }, [darkMode]);
 
   // Close sidebar on mobile when route changes
   useEffect(() => {
@@ -95,28 +75,23 @@ const AdminLayoutInner = () => {
 
   // ── Sidebar navigation items ──────────────────────────────────────────────
   const allNavItems = [
-    { id: 'dashboard',    path: '/admin/dashboard',    icon: '📊', label: 'Dashboard' },
-    { id: 'users',        path: '/admin/users',         icon: '👥', label: 'Users',      perm: 'view_users' },
-    { id: 'rewards',      path: '/admin/rewards',       icon: '🎁', label: 'Rewards',    perm: 'view_rewards' },
-    { id: 'posts',        path: '/admin/posts',         icon: '🛡️', label: 'Moderation', perm: 'moderate_posts' },
-    { id: 'financial',    path: '/admin/financial',     icon: '💰', label: 'Financial',  perm: 'view_financial_reports' },
-    { id: 'analytics',    path: '/admin/analytics',     icon: '📈', label: 'Analytics',  perm: 'view_analytics' },
-    { id: 'audit',        path: '/admin/audit-logs',    icon: '📜', label: 'Audit Logs', perm: 'view_audit_logs' },
-    { id: 'admins',       path: '/admin/admins',        icon: '👑', label: 'Admins',     perm: 'manage_admins' },
-    { id: 'trust',        path: '/admin/trust',         icon: '🔍', label: 'Trust & Safety', perm: 'view_analytics' },
-    {
-      id: 'create-admin', path: '/admin/create-admin',  icon: '✦',  label: 'Create Admin',
-      perm: null, superOnly: true, highlight: true,
-    },
-    {
-      id: 'roles',        path: '/admin/roles',          icon: '🔑', label: 'Roles & Permissions',
-      perm: null, superOnly: true,
-    },
+    { id: 'dashboard', path: '/admin/dashboard', icon: '📊', label: 'Dashboard' },
+    { id: 'users', path: '/admin/users', icon: '👥', label: 'Users' },
+    { id: 'activity-report', path: '/admin/activity-report', icon: '📋', label: 'Activity Report' },
+    { id: 'rewards', path: '/admin/rewards', icon: '🎁', label: 'Rewards' },
+    { id: 'posts', path: '/admin/posts', icon: '🛡️', label: 'Moderation' },
+    { id: 'financial', path: '/admin/financial', icon: '💰', label: 'Financial' },
+    { id: 'analytics', path: '/admin/analytics', icon: '📈', label: 'Analytics' },
+    { id: 'audit', path: '/admin/audit-logs', icon: '📜', label: 'Audit Logs' },
+    { id: 'admins', path: '/admin/admins', icon: '👑', label: 'Admins', },
+    { id: 'trust', path: '/admin/trust', icon: '🔍', label: 'Trust & Safety' },
+    { id: 'create-admin', path: '/admin/create-admin', icon: '✦', label: 'Create Admin', superOnly: true, highlight: true },
+    { id: 'roles', path: '/admin/roles', icon: '🔑', label: 'Roles & Permissions', superOnly: true },
   ];
 
   const visibleNavItems = allNavItems.filter(item => {
     if (item.superOnly) return isSuperAdmin;
-    if (item.perm)      return hasPermission(item.perm);
+    if (item.perm) return hasPermission(item.perm);
     return true;
   });
 
@@ -129,6 +104,7 @@ const AdminLayoutInner = () => {
   const roleBadgeLabel = isSuperAdmin
     ? '⭐ Super Admin'
     : adminRoleName ? adminRoleName.replace(/_/g, ' ') : 'Admin';
+
 
   return (
     <div className="admin-layout">
@@ -157,21 +133,8 @@ const AdminLayoutInner = () => {
             <span className="user-email">{user?.email}</span>
             <span className={`user-badge ${isSuperAdmin ? 'super-badge' : ''}`}>{roleBadgeLabel}</span>
           </div>
-          <button
-            className="theme-toggle"
-            onClick={() => setDarkMode(d => !d)}
-            aria-label="Toggle theme"
-          >
-            {darkMode
-              ? <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                  <circle cx="12" cy="12" r="5" />
-                  <path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
-                </svg>
-              : <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-                </svg>
-            }
-          </button>
+          {/* AdminToolbar: language picker + theme toggle (replaces inline theme button) */}
+          <AdminToolbar />
           <button className="logout-btn" onClick={handleLogout}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -198,9 +161,7 @@ const AdminLayoutInner = () => {
               >
                 <span className="nav-icon">{item.icon}</span>
                 <span className="nav-label">{item.label}</span>
-                {item.perm && (
-                  <span className="perm-badge">{item.perm}</span>
-                )}
+                {item.perm && <span className="perm-badge">{item.perm}</span>}
               </button>
             ))}
           </nav>
@@ -215,7 +176,7 @@ const AdminLayoutInner = () => {
           </div>
         </aside>
 
-        {/* FIX: mobile overlay now uses reactive `isMobile` instead of stale window.innerWidth */}
+        {/* FIX: mobile overlay uses reactive `isMobile` instead of stale window.innerWidth */}
         {sidebarOpen && isMobile && (
           <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />
         )}
@@ -228,13 +189,13 @@ const AdminLayoutInner = () => {
   );
 };
 
-// Outer wrapper: NO Navigate guards — App.js AdminRoute is the auth gate.
+// FIX: No longer wraps in <I18nThemeProvider> — both context providers are
+// already mounted at the App root. Wrapping here again would create an isolated
+// second instance and break dark-mode / language state persistence.
 const AdminLayout = () => (
-  <I18nThemeProvider>
-    <PermissionsProvider>
-      <AdminLayoutInner />
-    </PermissionsProvider>
-  </I18nThemeProvider>
+  <PermissionsProvider>
+    <AdminLayoutInner />
+  </PermissionsProvider>
 );
 
 export default AdminLayout;

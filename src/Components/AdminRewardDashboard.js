@@ -16,7 +16,7 @@ import {
   Bar, Cell, PieChart, Pie,
 } from 'recharts';
 import { useI18nTheme } from '../Context/I18nThemeContext';
-import AdminToolbar from './AdminToolbar';
+// import AdminToolbar from './AdminToolbar';
 
 const formatDate = (d) =>
   new Date(d).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
@@ -44,9 +44,9 @@ const StatCard = ({ title, value, icon, color }) => (
 
 const AdminRewardDashboard = ({ filterByUserId }) => {
   const { t, darkMode } = useI18nTheme();
-  const [data, setData]                = useState(null);
-  const [viewJSON, setViewJSON]        = useState(false);
-  const [expanded, setExpanded]        = useState({});
+  const [data, setData] = useState(null);
+  const [viewJSON, setViewJSON] = useState(false);
+  const [expanded, setExpanded] = useState({});
 
   useEffect(() => {
     apiRequest.get('/api/admin/rewards')
@@ -69,11 +69,11 @@ const AdminRewardDashboard = ({ filterByUserId }) => {
     return obj;
   }, {});
 
-  const total  = data.referralRewards.length + data.postRewards.length + data.streakRewards.length;
+  const total = data.referralRewards.length + data.postRewards.length + data.streakRewards.length;
   const pieData = [
     { name: 'Referral', value: data.referralRewards.length },
-    { name: 'Post',     value: data.postRewards.length },
-    { name: 'Streak',   value: data.streakRewards.length },
+    { name: 'Post', value: data.postRewards.length },
+    { name: 'Streak', value: data.streakRewards.length },
   ];
 
   const tooltipStyle = {
@@ -91,10 +91,10 @@ const AdminRewardDashboard = ({ filterByUserId }) => {
         (data[`${type}Rewards`] || [])
           .filter(r => !filterByUserId || r.user?._id === filterByUserId)
           .map(r => ({
-            Type:  type,
+            Type: type,
             Email: r.user?.email ?? 'Unknown',
-            Slab:  r.slabAwarded ?? r.streakslab,
-            Date:  formatDate(r.createdAt),
+            Slab: r.slabAwarded ?? r.streakslab,
+            Date: formatDate(r.createdAt),
           }))
       );
     if (!rows.length) return toast.info('Nothing to export.');
@@ -128,16 +128,16 @@ const AdminRewardDashboard = ({ filterByUserId }) => {
                 {viewJSON ? (t.hideJson || 'Hide JSON') : (t.viewJson || 'View JSON')}
               </button>
             </div>
-            <AdminToolbar />
+            {/* <AdminToolbar /> */}
           </div>
         </div>
 
         {/* Stats */}
         <div className="ard-stats-grid">
-          <StatCard title={t.totalRewards    || 'Total Rewards'}    value={total.toLocaleString()}                         icon="🎯" color="#4f46e5" />
-          <StatCard title={t.referralRewards || 'Referral Rewards'} value={data.referralRewards.length.toLocaleString()}   icon="👥" color="#7c3aed" />
-          <StatCard title={t.postRewards     || 'Post Rewards'}     value={data.postRewards.length.toLocaleString()}       icon="📝" color="#ec4899" />
-          <StatCard title={t.streakRewards   || 'Streak Rewards'}   value={data.streakRewards.length.toLocaleString()}     icon="🔥" color="#f59e0b" />
+          <StatCard title={t.totalRewards || 'Total Rewards'} value={total.toLocaleString()} icon="🎯" color="#4f46e5" />
+          <StatCard title={t.referralRewards || 'Referral Rewards'} value={data.referralRewards.length.toLocaleString()} icon="👥" color="#7c3aed" />
+          <StatCard title={t.postRewards || 'Post Rewards'} value={data.postRewards.length.toLocaleString()} icon="📝" color="#ec4899" />
+          <StatCard title={t.streakRewards || 'Streak Rewards'} value={data.streakRewards.length.toLocaleString()} icon="🔥" color="#f59e0b" />
         </div>
 
         {/* Charts */}
@@ -158,8 +158,8 @@ const AdminRewardDashboard = ({ filterByUserId }) => {
 
           {[
             { key: 'referral', label: t.referralBySlab || 'Referral by Slab', color: '#7c3aed' },
-            { key: 'post',     label: t.postBySlab     || 'Post by Slab',     color: '#ec4899' },
-            { key: 'streak',   label: t.streakBySlab   || 'Streak by Slab',   color: '#f59e0b' },
+            { key: 'post', label: t.postBySlab || 'Post by Slab', color: '#ec4899' },
+            { key: 'streak', label: t.streakBySlab || 'Streak by Slab', color: '#f59e0b' },
           ].map(({ key, label, color }) => (
             <div key={key} className="ard-chart-card">
               <h3 className="ard-chart-title">{label}</h3>
@@ -182,8 +182,8 @@ const AdminRewardDashboard = ({ filterByUserId }) => {
               .filter(r => !filterByUserId || r.user?._id === filterByUserId)
               .slice(0, 50);
             const slabKey = type === 'streak' ? 'streakslab' : 'slabAwarded';
-            const isOpen  = expanded[type];
-            const icon    = type === 'referral' ? '👥' : type === 'post' ? '📝' : '🔥';
+            const isOpen = expanded[type];
+            const icon = type === 'referral' ? '👥' : type === 'post' ? '📝' : '🔥';
 
             return (
               <div key={type} className="ard-table-card">

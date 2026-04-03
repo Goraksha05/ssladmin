@@ -2,13 +2,10 @@
 import React, { useState, useCallback } from 'react';
 import apiRequest from '../../utils/apiRequest';
 import { toast } from 'react-toastify';
-import * as XLSX from 'xlsx';
-import { saveAs } from 'file-saver';
-import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import { exportCSV, exportExcel, exportPDF } from '../../utils/adminExport';
 import {
   PageHeader, Card, Btn, Select, SearchBar,
-  Table, Pagination, DateRangeFilter, AdminUIStyles,
+  Table, Pagination, DateRangeFilter,
 } from './AdminUI';
 
 const REPORT_TYPES = [
@@ -25,44 +22,6 @@ const PLAN_OPTIONS = [
   { value: 'Gold',     label: 'Gold' },
   { value: 'Premium',  label: 'Premium' },
 ];
-
-// ── Export helpers ──────────────────────────────────────────────────────────
-function exportCSV(rows, name) {
-  if (!rows.length) return toast.warn('No data to export');
-  const headers = Object.keys(rows[0]);
-  const csv = [headers.join(','), ...rows.map(r => headers.map(h => `"${String(r[h] ?? '').replace(/"/g, '""')}"`).join(','))].join('\n');
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-  saveAs(blob, `${name}_${Date.now()}.csv`);
-  toast.success('CSV exported');
-}
-
-function exportExcel(rows, name) {
-  if (!rows.length) return toast.warn('No data to export');
-  const ws = XLSX.utils.json_to_sheet(rows);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, name);
-  XLSX.writeFile(wb, `${name}_${Date.now()}.xlsx`);
-  toast.success('Excel exported');
-}
-
-function exportPDF(rows, name, columns) {
-  if (!rows.length) return toast.warn('No data to export');
-  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-  doc.setFontSize(14);
-  doc.text(name, 14, 16);
-  doc.setFontSize(9);
-  doc.text(`Generated: ${new Date().toLocaleString()}`, 14, 22);
-  doc.autoTable({
-    startY: 28,
-    head: [columns.map(c => c.label)],
-    body: rows.map(r => columns.map(c => String(r[c.key] ?? ''))),
-    styles: { fontSize: 7, cellPadding: 2 },
-    headStyles: { fillColor: [79, 70, 229] },
-    alternateRowStyles: { fillColor: [248, 248, 255] },
-  });
-  doc.save(`${name}_${Date.now()}.pdf`);
-  toast.success('PDF exported');
-}
 
 // ── User Report ─────────────────────────────────────────────────────────────
 const UserReportTab = () => {
@@ -316,7 +275,6 @@ const AdminReports = () => {
 
   return (
     <>
-      <AdminUIStyles />
       <PageHeader title="Reports" subtitle="Generate, filter and export platform data" />
 
       <div className="rp-type-selector">

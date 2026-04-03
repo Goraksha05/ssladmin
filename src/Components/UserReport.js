@@ -31,7 +31,6 @@ import { saveAs } from 'file-saver';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import apiRequest from '../utils/apiRequest';
-import AdminToolbar from './AdminToolbar';
 import './UserReport.css';
 
 const SORT_KEYS = [
@@ -199,7 +198,6 @@ const AdminUserReport = () => {
             <h2 className="ur-page-title">Users Report</h2>
             <p className="ur-page-sub">Full subscription and reward activity by user</p>
           </div>
-          <AdminToolbar />
         </div>
 
         {/* Stats */}

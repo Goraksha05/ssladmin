@@ -1,129 +1,38 @@
 // src/Context/I18nThemeContext.js
+//
+// MIGRATION SHIM — keeps all existing imports working while components
+// migrate to the focused hooks:
+//
+//   useI18n()       from './I18nContext'
+//   useThemeMode()  from './ThemeModeContext'
+//
+// The combined <I18nThemeProvider> and <useI18nTheme> hook below compose
+// both providers / contexts so no existing call-site needs to change.
+// Once every consumer has been updated you can delete this file.
+// ── Combined provider (backward-compat) ───────────────────────────────────────
+import React                         from "react";
+import { I18nProvider, useI18n }     from "./I18nContext";
+import { ThemeModeProvider, useThemeMode } from "./ThemeModeContext";
 
-import React, { createContext, useContext, useState, useEffect, useMemo } from "react";
+export { LANGUAGES }           from "./I18nContext";
+export { I18nProvider }        from "./I18nContext";
+export { useI18n }             from "./I18nContext";
 
-// Translation files
-import en from "../translations/en.json";
-import hi from ".././translations/hi.json";
-import mr from "../translations/mr.json";
-import kn from "../translations/kn.json";
-import ta from "../translations/ta.json";
-import ml from "../translations/ml.json";
-import ja from "../translations/ja.json";
-import zh from "../translations/zh.json";
-import ar from "../translations/ar.json";
-import fr from "../translations/fr.json";
-import de from "../translations/de.json";
-import es from "../translations/es.json";
+export { ThemeModeProvider }   from "./ThemeModeContext";
+export { useThemeMode }        from "./ThemeModeContext";
 
-// Language metadata
-export const LANGUAGES = [
-  { code: "en", label: "English", flag: "🇬🇧", rtl: false },
-  { code: "hi", label: "हिन्दी", flag: "🇮🇳", rtl: false },
-  { code: "mr", label: "मराठी", flag: "🇮🇳", rtl: false },
-  { code: "kn", label: "ಕನ್ನಡ", flag: "🇮🇳", rtl: false },
-  { code: "ta", label: "தமிழ்", flag: "🇮🇳", rtl: false },
-  { code: "ml", label: "മലയാളം", flag: "🇮🇳", rtl: false },
-  { code: "ja", label: "日本語", flag: "🇯🇵", rtl: false },
-  { code: "zh", label: "中文", flag: "🇨🇳", rtl: false },
-  { code: "ar", label: "العربية", flag: "🇸🇦", rtl: true },
-  { code: "fr", label: "Français", flag: "🇫🇷", rtl: false },
-  { code: "de", label: "Deutsch", flag: "🇩🇪", rtl: false },
-  { code: "es", label: "Español", flag: "🇪🇸", rtl: false }
-];
 
-// Translation registry
-const TRANSLATIONS = {
-  en,
-  hi,
-  mr,
-  kn,
-  ta,
-  ml,
-  ja,
-  zh,
-  ar,
-  fr,
-  de,
-  es
-};
-
-const I18nThemeContext = createContext();
-
-export const I18nThemeProvider = ({ children }) => {
-
-  // Language
-  const [lang, setLang] = useState(() =>
-    localStorage.getItem("adminLang") || "en"
-  );
-
-  // Theme
-  const [darkMode, setDarkMode] = useState(() =>
-    localStorage.getItem("adminDarkMode") === "true"
-  );
-
-  // Persist settings
-  useEffect(() => {
-    localStorage.setItem("adminLang", lang);
-  }, [lang]);
-
-  useEffect(() => {
-    localStorage.setItem("adminDarkMode", darkMode);
-    document.documentElement.setAttribute(
-      "data-theme",
-      darkMode ? "dark" : "light"
-    );
-  }, [darkMode]);
-
-  // RTL handling
-  useEffect(() => {
-    const current = LANGUAGES.find(l => l.code === lang);
-    document.documentElement.dir = current?.rtl ? "rtl" : "ltr";
-  }, [lang]);
-
-  // Translation function
-  const t = useMemo(() => {
-    const dict = TRANSLATIONS[lang] || TRANSLATIONS.en;
-
-    const translate = (key, vars = {}) => {
-      let str = dict[key] ?? key;
-
-      Object.keys(vars).forEach(k => {
-        str = str.replace(new RegExp(`{${k}}`, "g"), vars[k]);
-      });
-
-      return str;
-    };
-
-    return {
-      ...dict,
-      format: translate
-    };
-
-  }, [lang]);
-
-  const value = {
-    lang,
-    setLang,
-    darkMode,
-    setDarkMode,
-    t
-  };
-
-  return (
-    <I18nThemeContext.Provider value={value}>
+export const I18nThemeProvider = ({ children }) => (
+  <ThemeModeProvider>
+    <I18nProvider>
       {children}
-    </I18nThemeContext.Provider>
-  );
-};
+    </I18nProvider>
+  </ThemeModeProvider>
+);
 
-// Hook
+// Combined hook — matches original { lang, setLang, darkMode, setDarkMode, t }
 export const useI18nTheme = () => {
-  const ctx = useContext(I18nThemeContext);
-
-  if (!ctx) {
-    throw new Error("useI18nTheme must be used inside <I18nThemeProvider>");
-  }
-
-  return ctx;
+  const { lang, setLang, t }       = useI18n();
+  const { darkMode, setDarkMode }  = useThemeMode();
+  return { lang, setLang, darkMode, setDarkMode, t };
 };

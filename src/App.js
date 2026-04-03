@@ -3,13 +3,18 @@
 import React, { Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { useSocketSync } from './WebSocket/useSocketSync';
 
 import { AuthProvider, useAuth } from './Context/AuthContext';
 import { AdminAuthProvider } from './Context/AdminAuthContext';
 import { AdminKycProvider } from './Context/AdminKycContext';
 import { PermissionsProvider } from './Context/PermissionsContext';
 import { PayoutProvider } from './Context/PayoutContext';
-import { I18nThemeProvider } from './Context/I18nThemeContext';
+// import { NotificationProvider } from "./Context/NotificationContext";
+
+// Split contexts — use the focused providers in the root
+import { I18nProvider } from './Context/I18nContext';
+import { ThemeModeProvider } from './Context/ThemeModeContext';
 import AdminRouteGuard from './Components/AdminRouteGuard';
 
 // Pages
@@ -34,9 +39,9 @@ const RewardPayout = lazy(() => import('./Components/Admin/RewardPayout'));
 const AdminLogs = lazy(() => import('./Components/Admin/AdminLogs'));
 const AdminReports = lazy(() => import('./Components/Admin/AdminReports'));
 const AdminTrustDashboard = lazy(() => import('./Components/Admin/AdminTrustDashboard'));
-// FIX: AdminKycDashboard now exists and is properly wired
 const AdminKycDashboard = lazy(() => import('./Components/KYC/AdminKycDashboard'));
 const AdminCreateUser = lazy(() => import('./pages/AdminCreateUser'));
+const AdminActivityReport = lazy(() => import('./Components/Admin/AdminActivityReport'));
 
 // ── Query Client ──────────────────────────────────────────────────────────────
 const queryClient = new QueryClient({
@@ -82,25 +87,18 @@ function PrivateRoute({ children }) {
   return isAuthenticated ? children : <Navigate to="/login" replace />;
 }
 
-// FIX: renamed from AdminRoute → AdminGuard to avoid collision with the imported
-//      AdminRoute component from './Components/AdminRoute/AdminRoute'.
-//      FIX: added authLoading guard to prevent flash redirect on hard reload.
 function AdminGuard({ children }) {
   const { isAuthenticated, authLoading, user } = useAuth();
   if (authLoading) return null;
   if (!isAuthenticated) return <Navigate to="/login" replace />;
-  // FIX: redirect non-admins to home (not /unauthorized which doesn't exist)
   if (!user?.isAdmin) return <Navigate to="/" replace />;
   return children;
 }
 
-// FIX: `user?.isSuperAdmin` does not exist. AuthContext sets `role` on the user
-//      object. Super admin check must use `user?.role === 'super_admin'`.
 function SuperAdminRoute({ children }) {
   const { user, authLoading } = useAuth();
   if (authLoading) return null;
-  const isSuperAdmin = user?.role === 'super_admin';
-  if (!isSuperAdmin) return <Navigate to="/admin/dashboard" replace />;
+  if (user?.role !== 'super_admin') return <Navigate to="/admin/dashboard" replace />;
   return children;
 }
 
@@ -109,9 +107,11 @@ function SuperAdminRoute({ children }) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function AppRoutes() {
+  useSocketSync();
+  // FIX: PermissionsProvider is here — inside AuthProvider — so useAuth() is
+  // available. Only one PermissionsProvider exists; the duplicate that was
+  // previously also sitting in the App root has been removed.
   return (
-    // FIX: PermissionsProvider is here (inside AuthProvider) so it can call
-    //      useAuth() safely. KycProvider is also here for user-facing KYC page.
     <PermissionsProvider>
       <AdminKycProvider>
         <Routes>
@@ -127,14 +127,7 @@ function AppRoutes() {
           <Route
             path="/admin"
             element={
-              // FIX: AdminGuard (was AdminRoute) now has the authLoading guard
               <AdminGuard>
-                {/*
-                  FIX: AdminAuthProvider lives here, inside AdminGuard, so it
-                  only mounts when the user is confirmed to be an admin. This
-                  prevents it from fetching /api/admin/me for non-admin users.
-                  AdminLayout renders the sidebar + <Outlet /> for child routes.
-                */}
                 <AdminAuthProvider>
                   <AdminLayout />
                 </AdminAuthProvider>
@@ -143,95 +136,49 @@ function AppRoutes() {
           >
             <Route index element={<Navigate to="dashboard" replace />} />
 
-            {/* DASHBOARD — no permission guard; all admins can see the overview */}
             <Route path="dashboard" element={<AdminDashboard />} />
 
-            {/* ANALYTICS */}
             <Route path="analytics" element={
-              <AdminRouteGuard permission="view_analytics">
-                <AdminOverview />
-              </AdminRouteGuard>
+              <AdminRouteGuard permission="view_analytics"><AdminOverview /></AdminRouteGuard>
             } />
-
-            {/* USERS */}
             <Route path="users" element={
-              <AdminRouteGuard permission="view_users">
-                <AdminUserReport />
-              </AdminRouteGuard>
+              <AdminRouteGuard permission="view_users"><AdminUserReport /></AdminRouteGuard>
             } />
-
-            {/* KYC — FIX: properly wired to AdminKycDashboard with permission gate */}
             <Route path="kyc" element={
-              <AdminRouteGuard permission="view_users">
-                <AdminKycDashboard />
-              </AdminRouteGuard>
+              <AdminRouteGuard permission="view_users"><AdminKycDashboard /></AdminRouteGuard>
             } />
-
-            {/* REWARDS */}
             <Route path="rewards" element={
-              <AdminRouteGuard permission="view_rewards">
-                <AdminRewards />
-              </AdminRouteGuard>
+              <AdminRouteGuard permission="view_rewards"><AdminRewards /></AdminRouteGuard>
             } />
-
-            {/* REPORTS */}
+            <Route path="activity-report" element={
+              <AdminRouteGuard permission="view_reports"><AdminActivityReport /></AdminRouteGuard>
+            } />
             <Route path="reports" element={
-              <AdminRouteGuard permission="view_reports">
-                <AdminReports />
-              </AdminRouteGuard>
+              <AdminRouteGuard permission="view_reports"><AdminReports /></AdminRouteGuard>
             } />
-
-            {/* FINANCIAL — FIX: split into separate routes so they don't render as siblings */}
             <Route path="financial" element={
-              <AdminRouteGuard permission="view_financial_reports">
-                <AdminFinancial />
-              </AdminRouteGuard>
+              <AdminRouteGuard permission="view_financial_reports"><AdminFinancial /></AdminRouteGuard>
             } />
-
-            {/* PAYOUTS — separate from financial overview */}
             <Route path="payouts" element={
               <AdminRouteGuard permission="manage_payouts">
-                <PayoutProvider>
-                  <RewardPayout />
-                </PayoutProvider>
+                <PayoutProvider><RewardPayout /></PayoutProvider>
               </AdminRouteGuard>
             } />
-
-            {/* CONTENT MODERATION */}
             <Route path="posts" element={
-              <AdminRouteGuard permission="moderate_posts">
-                <AdminContent />
-              </AdminRouteGuard>
+              <AdminRouteGuard permission="moderate_posts"><AdminContent /></AdminRouteGuard>
             } />
-
-            {/* AUDIT LOGS */}
             <Route path="audit-logs" element={
-              <AdminRouteGuard permission="view_audit_logs">
-                <AdminAuditLogs />
-              </AdminRouteGuard>
+              <AdminRouteGuard permission="view_audit_logs"><AdminAuditLogs /></AdminRouteGuard>
             } />
-
-            {/* ADMIN MANAGEMENT */}
             <Route path="admins" element={
-              <AdminRouteGuard permission="manage_admins">
-                <AdminAdmins />
-              </AdminRouteGuard>
+              <AdminRouteGuard permission="manage_admins"><AdminAdmins /></AdminRouteGuard>
             } />
-
-            {/* ACTIVITY LOGS — visible to all admins */}
             <Route path="logs" element={<AdminLogs />} />
-
-            {/* TRUST & SAFETY */}
             <Route path="trust" element={<AdminTrustDashboard />} />
 
-            {/* ── SUPER ADMIN ONLY ── */}
-            <Route path="create-admin" element={
-              <SuperAdminRoute><AdminCreateUser /></SuperAdminRoute>
-            } />
-
-            <Route path="roles" element={
-              <SuperAdminRoute><AdminRoleManagement /></SuperAdminRoute>
-            } />
+            {/* ── Super Admin only ── */}
+            <Route path="create-admin" element={<SuperAdminRoute><AdminCreateUser /></SuperAdminRoute>} />
+            <Route path="roles" element={<SuperAdminRoute><AdminRoleManagement /></SuperAdminRoute>} />
           </Route>
 
           {/* Fallback */}
@@ -246,21 +193,31 @@ function AppRoutes() {
 // ─────────────────────────────────────────────────────────────────────────────
 // APP ROOT
 // ─────────────────────────────────────────────────────────────────────────────
+// Provider order (outer → inner):
+//   QueryClientProvider     — React Query cache, no auth dependency
+//   ThemeModeProvider       — writes data-theme on <html>, no auth dependency
+//   I18nProvider            — language + translations, no auth dependency
+//   AuthProvider            — token + user object
+//     AppRoutes
+//       PermissionsProvider — needs useAuth(), lives inside AuthProvider
+//         AdminKycProvider
 
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <PermissionsProvider>
-          <I18nThemeProvider>
-            <Router>
-              <Suspense fallback={<PageLoader />}>
-                <AppRoutes />
-              </Suspense>
-            </Router>
-          </I18nThemeProvider>
-        </PermissionsProvider>
-      </AuthProvider>
+      <ThemeModeProvider>
+        <I18nProvider>
+          <AuthProvider>
+            {/* <NotificationProvider> */}
+              <Router>
+                <Suspense fallback={<PageLoader />}>
+                  <AppRoutes />
+                </Suspense>
+              </Router>
+            {/* </NotificationProvider> */}
+          </AuthProvider>
+        </I18nProvider>
+      </ThemeModeProvider>
     </QueryClientProvider>
   );
 }
