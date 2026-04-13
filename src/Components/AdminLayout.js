@@ -78,7 +78,6 @@ const AdminLayoutInner = () => {
     { id: 'dashboard', path: '/admin/dashboard', icon: '📊', label: 'Dashboard' },
     { id: 'users', path: '/admin/users', icon: '👥', label: 'Users' },
     { id: 'activity-report', path: '/admin/activity-report', icon: '📋', label: 'Activity Report' },
-    { id: 'rewards', path: '/admin/rewards', icon: '🎁', label: 'Rewards' },
     { id: 'posts', path: '/admin/posts', icon: '🛡️', label: 'Moderation' },
     { id: 'financial', path: '/admin/financial', icon: '💰', label: 'Financial' },
     { id: 'analytics', path: '/admin/analytics', icon: '📈', label: 'Analytics' },

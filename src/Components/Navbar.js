@@ -1,12 +1,4 @@
 // Components/Navbar.js
-//
-// CHANGES FROM PREVIOUS VERSION:
-//
-//   1. Removed the <I18nThemeProvider> wrapper that was wrapping the entire
-//      Navbar. Both I18nProvider and ThemeModeProvider are now mounted once
-//      at the App root, so wrapping again here created an isolated, nested
-//      context instance. Any language or theme changes made outside Navbar
-//      would not have been reflected inside it (and vice-versa).
 
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -18,8 +10,11 @@ function Navbar() {
   const { logout } = useAuth();
 
   const handleLogout = () => {
+    // FIX: navigate first, then clear state.
+    // This ensures admin route components unmount before AuthContext resets,
+    // preventing a flash of unauthenticated state in protected routes.
+    navigate('/login', { replace: true });
     logout();
-    navigate('/login');
   };
 
   return (

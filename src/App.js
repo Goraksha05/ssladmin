@@ -26,22 +26,23 @@ import KycVerification from './Components/KYC/KycVerification';
 import AdminLayout from './Components/AdminLayout';
 
 // ── Lazy Admin Pages ──────────────────────────────────────────────────────────
-const AdminDashboard = lazy(() => import('./Components/AdminDashboard'));
-const AdminUserReport = lazy(() => import('./Components/UserReport'));
-const AdminAdmins = lazy(() => import('./Components/Admin/AdminAdmins'));
-const AdminRoleManagement = lazy(() => import('./Components/Admin/AdminRoleManagement'));
-const AdminAuditLogs = lazy(() => import('./Components/Admin/AdminAuditLogs'));
-const AdminOverview = lazy(() => import('./Components/Admin/AdminOverview'));
-const AdminRewards = lazy(() => import('./Components/Admin/AdminRewards'));
-const AdminContent = lazy(() => import('./Components/Admin/AdminContent'));
-const AdminFinancial = lazy(() => import('./Components/Admin/AdminFinancial'));
-const RewardPayout = lazy(() => import('./Components/Admin/RewardPayout'));
-const AdminLogs = lazy(() => import('./Components/Admin/AdminLogs'));
-const AdminReports = lazy(() => import('./Components/Admin/AdminReports'));
-const AdminTrustDashboard = lazy(() => import('./Components/Admin/AdminTrustDashboard'));
-const AdminKycDashboard = lazy(() => import('./Components/KYC/AdminKycDashboard'));
-const AdminCreateUser = lazy(() => import('./pages/AdminCreateUser'));
-const AdminActivityReport = lazy(() => import('./Components/Admin/AdminActivityReport'));
+const AdminDashboard              = lazy(() => import('./Components/AdminDashboard'));
+const AdminUserReport             = lazy(() => import('./Components/UserReport'));
+const AdminAdmins                 = lazy(() => import('./Components/Admin/AdminAdmins'));
+const AdminRoleManagement         = lazy(() => import('./Components/Admin/AdminRoleManagement'));
+const AdminAuditLogs              = lazy(() => import('./Components/Admin/AdminAuditLogs'));
+const AdminOverview               = lazy(() => import('./Components/Admin/AdminOverview'));
+const AdminRewards                = lazy(() => import('./Components/Admin/AdminRewards'));
+const AdminContent                = lazy(() => import('./Components/Admin/AdminContent'));
+const AdminFinancial              = lazy(() => import('./Components/Admin/AdminFinancial'));
+const RewardPayout                = lazy(() => import('./Components/Admin/RewardPayout'));
+const AdminLogs                   = lazy(() => import('./Components/Admin/AdminLogs'));
+const AdminReports                = lazy(() => import('./Components/Admin/AdminReports'));
+const AdminTrustDashboard         = lazy(() => import('./Components/Admin/AdminTrustDashboard'));
+const AdminKycDashboard           = lazy(() => import('./Components/KYC/AdminKycDashboard'));
+const AdminCreateUser             = lazy(() => import('./pages/AdminCreateUser'));
+const AdminActivityReport         = lazy(() => import('./Components/Admin/AdminActivityReport'));
+const WalletReport                = lazy(() => import('./Components/Admin/WalletReport'));
 
 // ── Query Client ──────────────────────────────────────────────────────────────
 const queryClient = new QueryClient({
@@ -179,10 +180,15 @@ function AppRoutes() {
             {/* ── Super Admin only ── */}
             <Route path="create-admin" element={<SuperAdminRoute><AdminCreateUser /></SuperAdminRoute>} />
             <Route path="roles" element={<SuperAdminRoute><AdminRoleManagement /></SuperAdminRoute>} />
-          </Route>
+            </Route>
 
-          {/* Fallback */}
-          <Route path="*" element={<Navigate to="/" replace />} />
+            {/* Fallback */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+
+            {/* Wallet */}
+            <Route path="wallet-report" element={
+              <AdminRouteGuard permission="view_reports"><WalletReport /></AdminRouteGuard>
+            } />
 
         </Routes>
       </AdminKycProvider>

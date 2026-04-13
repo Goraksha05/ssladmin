@@ -20,6 +20,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-toastify';
 import apiRequest from '../../utils/apiRequest';
 import { usePermissions } from '../../Context/PermissionsContext';
+import WalletReport from './WalletReport';
 import { exportCSV, exportExcel, exportPDF } from '../../utils/adminExport';
 import {
   PageHeader, Card, Btn, Badge, SearchBar,
@@ -276,11 +277,37 @@ const DetailDrawer = ({ userId, onClose }) => {
 
             {/* Wallet */}
             <div className="ar-section-label" style={{ marginTop: '1.25rem' }}>Wallet</div>
+
+            {/* ── Cash rewards ── */}
+            <div style={{
+              fontSize: '.7rem', fontWeight: 700, color: 'var(--text-secondary)',
+              textTransform: 'uppercase', letterSpacing: '.06em', margin: '.5rem 0 .25rem',
+            }}>
+              Cash Rewards
+            </div>
             <div className="ar-info-grid">
-              <div className="ar-info-row"><span>Grocery Coupons</span><span>{fmtINR(s?.wallet?.groceryCoupons)}</span></div>
-              <div className="ar-info-row"><span>Shares</span><span>{fmt(s?.wallet?.shares)} units</span></div>
-              <div className="ar-info-row"><span>Referral Tokens</span><span>{fmt(s?.wallet?.referralToken)}</span></div>
-              <div className="ar-info-row"><span>Estimated Value</span><span style={{ fontWeight: 700 }}>{fmtINR(s?.wallet?.estimatedINR)}</span></div>
+              <div className="ar-info-row">
+                <span>🛒 Grocery Coupons</span>
+                <span style={{ fontWeight: 700, color: '#7c3aed' }}>{fmtINR(s?.wallet?.groceryCoupons)}</span>
+              </div>
+            </div>
+
+            {/* ── Non-cash assets ── */}
+            <div style={{
+              fontSize: '.7rem', fontWeight: 700, color: 'var(--text-secondary)',
+              textTransform: 'uppercase', letterSpacing: '.06em', margin: '.75rem 0 .25rem',
+            }}>
+              Non-Cash Assets
+            </div>
+            <div className="ar-info-grid">
+              <div className="ar-info-row">
+                <span>📈 Shares</span>
+                <span style={{ fontWeight: 700, color: '#0891b2' }}>{fmt(s?.wallet?.shares)} units</span>
+              </div>
+              <div className="ar-info-row">
+                <span>🪙 Referral Tokens</span>
+                <span style={{ fontWeight: 700, color: '#be185d' }}>{fmt(s?.wallet?.referralToken)}</span>
+              </div>
             </div>
 
             {/* Payouts */}
@@ -369,11 +396,15 @@ const AdminActivityReport = () => {
   const summary = useMemo(() => {
     if (!rows.length) return null;
     return {
-      totalPosts: rows.reduce((s, r) => s + (r.posts?.count || 0), 0),
-      totalReferrals: rows.reduce((s, r) => s + (r.referrals?.active || 0), 0),
-      totalStreaks: rows.reduce((s, r) => s + (r.streaks?.uniqueDays || 0), 0),
-      totalWallet: rows.reduce((s, r) => s + (r.wallet?.estimatedINR || 0), 0),
-      totalClaimed: rows.reduce((s, r) => s + (r.totalClaimedINR || 0), 0),
+      totalPosts:     rows.reduce((s, r) => s + (r.posts?.count           || 0), 0),
+      totalReferrals: rows.reduce((s, r) => s + (r.referrals?.active      || 0), 0),
+      totalStreaks:   rows.reduce((s, r) => s + (r.streaks?.uniqueDays     || 0), 0),
+      // Cash reward — Grocery Coupons are the only ₹ value
+      totalCoupons:   rows.reduce((s, r) => s + (r.wallet?.groceryCoupons || 0), 0),
+      // Non-cash assets — counts, not ₹
+      totalShares:    rows.reduce((s, r) => s + (r.wallet?.shares         || 0), 0),
+      totalTokens:    rows.reduce((s, r) => s + (r.wallet?.referralToken  || 0), 0),
+      totalClaimed:   rows.reduce((s, r) => s + (r.totalClaimedINR        || 0), 0),
     };
   }, [rows]);
 
@@ -408,6 +439,9 @@ const AdminActivityReport = () => {
   return (
     <>
       <AdminUIStyles />
+      <div className="ar-container pb-5">
+        <WalletReport /> {/* Embedded Wallet Report component */} 
+      </div>
 
       {/* ── Header ── */}
       <PageHeader
@@ -450,11 +484,13 @@ const AdminActivityReport = () => {
       {summary && (
         <div className="ar-kpi-strip">
           {[
-            { icon: '📝', label: 'Posts (page)', val: fmt(summary.totalPosts), color: '#4f46e5' },
-            { icon: '👥', label: 'Active Refs (page)', val: fmt(summary.totalReferrals), color: '#059669' },
-            { icon: '🔥', label: 'Streak Days (page)', val: fmt(summary.totalStreaks), color: '#d97706' },
-            { icon: '💰', label: 'Wallet Value', val: fmtINR(summary.totalWallet), color: '#7c3aed' },
-            { icon: '✅', label: 'Total Claimed', val: fmtINR(summary.totalClaimed), color: '#ec4899' },
+            { icon: '📝', label: 'Posts (page)',       val: fmt(summary.totalPosts),                      color: '#4f46e5' },
+            { icon: '👥', label: 'Active Refs (page)', val: fmt(summary.totalReferrals),                   color: '#059669' },
+            { icon: '🔥', label: 'Streak Days (page)', val: fmt(summary.totalStreaks),                     color: '#d97706' },
+            { icon: '🛒', label: 'Grocery Coupons',    val: fmtINR(summary.totalCoupons),                 color: '#7c3aed' },
+            { icon: '📈', label: 'Total Shares',        val: `${fmt(summary.totalShares)} units`,          color: '#0891b2' },
+            { icon: '🪙', label: 'Total Tokens',         val: fmt(summary.totalTokens),                    color: '#be185d' },
+            { icon: '✅', label: 'Total Claimed',        val: fmtINR(summary.totalClaimed),                color: '#ec4899' },
           ].map(({ icon, label, val, color }) => (
             <div key={label} className="ar-kpi-chip" style={{ '--chip-color': color }}>
               <span className="ar-kpi-icon">{icon}</span>
@@ -513,7 +549,9 @@ const AdminActivityReport = () => {
                     <th>Streaks</th>
                     <th>Claimed Slabs</th>
                     <th>In Progress</th>
-                    <th>Wallet</th>
+                    <th>Grocery Coupons</th>
+                    <th>Shares</th>
+                    <th>Tokens</th>
                     <th>Payouts</th>
                     <th>Status</th>
                     <th>Actions</th>
@@ -628,15 +666,27 @@ const AdminActivityReport = () => {
                           </div>
                         </td>
 
-                        {/* Wallet */}
-                        <td>
-                          <div style={{ fontSize: '.8rem', lineHeight: 1.6 }}>
-                            <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{fmtINR(row.wallet?.estimatedINR)}</div>
-                            <div style={{ color: 'var(--text-secondary)', fontSize: '.7rem' }}>
-                              🛒 {fmtINR(row.wallet?.groceryCoupons)}<br />
-                              📈 {fmt(row.wallet?.shares)} shares
-                            </div>
+                        {/* Grocery Coupons — cash reward ₹ */}
+                        <td style={{ textAlign: 'center' }}>
+                          <div style={{ fontWeight: 700, color: '#7c3aed', fontSize: '.875rem' }}>
+                            {fmtINR(row.wallet?.groceryCoupons)}
                           </div>
+                        </td>
+
+                        {/* Shares — non-cash asset, count only */}
+                        <td style={{ textAlign: 'center' }}>
+                          <div style={{ fontWeight: 700, color: '#0891b2', fontSize: '.875rem' }}>
+                            {fmt(row.wallet?.shares)}
+                          </div>
+                          <div style={{ fontSize: '.65rem', color: 'var(--text-secondary)' }}>units</div>
+                        </td>
+
+                        {/* Referral Tokens — non-cash asset, count only */}
+                        <td style={{ textAlign: 'center' }}>
+                          <div style={{ fontWeight: 700, color: '#be185d', fontSize: '.875rem' }}>
+                            {fmt(row.wallet?.referralToken)}
+                          </div>
+                          <div style={{ fontSize: '.65rem', color: 'var(--text-secondary)' }}>tokens</div>
                         </td>
 
                         {/* Payouts */}
@@ -674,7 +724,7 @@ const AdminActivityReport = () => {
                       {/* Inline expanded row */}
                       {expandedRow === row._id && (
                         <tr className="ar-expanded-row">
-                          <td colSpan={11}>
+                          <td colSpan={13}>
                             <div className="ar-inline-detail">
                               <div className="ar-inline-col">
                                 <div className="ar-inline-label">Posts Redeemed</div>

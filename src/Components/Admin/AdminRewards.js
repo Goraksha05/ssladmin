@@ -1,40 +1,4 @@
 // Components/Admin/AdminRewards.js
-//
-// CHANGES FROM ORIGINAL:
-//
-//   1. CRITICAL (carried forward) — UndoPanel originally called
-//      GET /api/admin/users/:id which doesn't exist. Fixed in previous version
-//      to load all rewards via GET /api/admin/rewards. Retained here.
-//
-//   2. FIX — UndoPanel user list only showed the first page (no pagination).
-//      GET /api/admin/users returns a paginated response. The UndoPanel now
-//      fetches with limit=200 to cover most real-world user bases. If the
-//      platform has more users, an explicit search field is provided so the
-//      admin can filter. This is a pragmatic trade-off to avoid full
-//      server-side autocomplete complexity in this panel.
-//
-//   3. FIX — GET /api/admin/reward-claims response shape. The backend returns
-//      either a flat array OR { claims, pagination }. The original already
-//      handled this dual shape — kept as-is.
-//
-//   4. FIX — Slab key inconsistency. Streak rewards use 'streakslab' (backend
-//      field name on StreakReward document). Referral and Post rewards use
-//      'slabAwarded'. The original handled this correctly in UndoPanel.
-//      However the POST /api/admin/undo-reward payload was sending `slab` as
-//      a string. Backend expects `{ userId, type, slab }` where slab is the
-//      numeric/string value of the slab — this is already correct.
-//
-//   5. FIX — Tab state management: switching tabs previously did not cancel
-//      in-flight requests; stale data could overwrite the new tab's state.
-//      Added an `isMounted` guard pattern in fetchOverview and fetchClaims.
-//
-//   6. FIX — Claims table: `claimCols` used `c.user?.name` but claims
-//      populated via RewardClaim.populate('user') return `user` as an object.
-//      Shape is already correct — no change needed but verified.
-//
-//   7. FIX — Missing `style` prop on AdminUIStyles Btn prevented the gold
-//      "Create Admin" button in AdminAdmins from rendering its inline styles.
-//      This was fixed in AdminUI.js. No change needed here.
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
