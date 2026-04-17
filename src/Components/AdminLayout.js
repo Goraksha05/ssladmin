@@ -22,7 +22,7 @@ import Logo from './XLogo/Logo';
 import { AdminUIStyles } from './Admin/AdminUI';
 import AdminToolbar from './AdminToolbar';
 import './AdminLayout.css';
-
+import { PayoutNotificationCenter } from './PayoutNotificationCenter';
 
 // FIX: responsive window-width hook — avoids stale window.innerWidth in render
 function useWindowWidth() {
@@ -134,6 +134,7 @@ const AdminLayoutInner = () => {
           </div>
           {/* AdminToolbar: language picker + theme toggle (replaces inline theme button) */}
           <AdminToolbar />
+          <PayoutNotificationCenter />
           <button className="logout-btn" onClick={handleLogout}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}

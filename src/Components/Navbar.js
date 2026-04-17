@@ -4,6 +4,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../Context/AuthContext';
 import Logo from './XLogo/Logo';
+import { PayoutNotificationCenter } from './PayoutNotificationCenter';
 
 function Navbar() {
   const navigate = useNavigate();
@@ -23,6 +24,7 @@ function Navbar() {
         <div className="navbar-logo"><Logo /> अॅडमिन पॅनल</div>
         <div className="navbar-links">
           <button onClick={handleLogout} className="btn">
+          <PayoutNotificationCenter />
             लॉगआउट
           </button>
         </div>

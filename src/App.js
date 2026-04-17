@@ -10,6 +10,7 @@ import { AdminAuthProvider } from './Context/AdminAuthContext';
 import { AdminKycProvider } from './Context/AdminKycContext';
 import { PermissionsProvider } from './Context/PermissionsContext';
 import { PayoutProvider } from './Context/PayoutContext';
+import { PayoutNotificationProvider } from './Context/PayoutNotificationContext';
 // import { NotificationProvider } from "./Context/NotificationContext";
 
 // Split contexts — use the focused providers in the root
@@ -114,84 +115,86 @@ function AppRoutes() {
   // previously also sitting in the App root has been removed.
   return (
     <PermissionsProvider>
-      <AdminKycProvider>
-        <Routes>
+      <PayoutNotificationProvider>
+        <AdminKycProvider>
+          <Routes>
 
-          {/* ── Public ── */}
-          <Route path="/login" element={<PublicOnlyRoute><Login /></PublicOnlyRoute>} />
+            {/* ── Public ── */}
+            <Route path="/login" element={<PublicOnlyRoute><Login /></PublicOnlyRoute>} />
 
-          {/* ── User ── */}
-          <Route path="/" element={<PrivateRoute><Home /></PrivateRoute>} />
-          <Route path="/kyc" element={<PrivateRoute><KycVerification /></PrivateRoute>} />
+            {/* ── User ── */}
+            <Route path="/" element={<PrivateRoute><Home /></PrivateRoute>} />
+            <Route path="/kyc" element={<PrivateRoute><KycVerification /></PrivateRoute>} />
 
-          {/* ── Admin ── */}
-          <Route
-            path="/admin"
-            element={
-              <AdminGuard>
-                <AdminAuthProvider>
-                  <AdminLayout />
-                </AdminAuthProvider>
-              </AdminGuard>
-            }
-          >
-            <Route index element={<Navigate to="dashboard" replace />} />
+            {/* ── Admin ── */}
+            <Route
+              path="/admin"
+              element={
+                <AdminGuard>
+                  <AdminAuthProvider>
+                    <AdminLayout />
+                  </AdminAuthProvider>
+                </AdminGuard>
+              }
+            >
+              <Route index element={<Navigate to="dashboard" replace />} />
 
-            <Route path="dashboard" element={<AdminDashboard />} />
+              <Route path="dashboard" element={<AdminDashboard />} />
 
-            <Route path="analytics" element={
-              <AdminRouteGuard permission="view_analytics"><AdminOverview /></AdminRouteGuard>
-            } />
-            <Route path="users" element={
-              <AdminRouteGuard permission="view_users"><AdminUserReport /></AdminRouteGuard>
-            } />
-            <Route path="kyc" element={
-              <AdminRouteGuard permission="view_users"><AdminKycDashboard /></AdminRouteGuard>
-            } />
-            <Route path="rewards" element={
-              <AdminRouteGuard permission="view_rewards"><AdminRewards /></AdminRouteGuard>
-            } />
-            <Route path="activity-report" element={
-              <AdminRouteGuard permission="view_reports"><AdminActivityReport /></AdminRouteGuard>
-            } />
-            <Route path="reports" element={
-              <AdminRouteGuard permission="view_reports"><AdminReports /></AdminRouteGuard>
-            } />
-            <Route path="financial" element={
-              <AdminRouteGuard permission="view_financial_reports"><AdminFinancial /></AdminRouteGuard>
-            } />
-            <Route path="payouts" element={
-              <AdminRouteGuard permission="manage_payouts">
-                <PayoutProvider><RewardPayout /></PayoutProvider>
-              </AdminRouteGuard>
-            } />
-            <Route path="posts" element={
-              <AdminRouteGuard permission="moderate_posts"><AdminContent /></AdminRouteGuard>
-            } />
-            <Route path="audit-logs" element={
-              <AdminRouteGuard permission="view_audit_logs"><AdminAuditLogs /></AdminRouteGuard>
-            } />
-            <Route path="admins" element={
-              <AdminRouteGuard permission="manage_admins"><AdminAdmins /></AdminRouteGuard>
-            } />
-            <Route path="logs" element={<AdminLogs />} />
-            <Route path="trust" element={<AdminTrustDashboard />} />
+              <Route path="analytics" element={
+                <AdminRouteGuard permission="view_analytics"><AdminOverview /></AdminRouteGuard>
+              } />
+              <Route path="users" element={
+                <AdminRouteGuard permission="view_users"><AdminUserReport /></AdminRouteGuard>
+              } />
+              <Route path="kyc" element={
+                <AdminRouteGuard permission="view_users"><AdminKycDashboard /></AdminRouteGuard>
+              } />
+              <Route path="rewards" element={
+                <AdminRouteGuard permission="view_rewards"><AdminRewards /></AdminRouteGuard>
+              } />
+              <Route path="activity-report" element={
+                <AdminRouteGuard permission="view_reports"><AdminActivityReport /></AdminRouteGuard>
+              } />
+              <Route path="reports" element={
+                <AdminRouteGuard permission="view_reports"><AdminReports /></AdminRouteGuard>
+              } />
+              <Route path="financial" element={
+                <AdminRouteGuard permission="view_financial_reports"><AdminFinancial /></AdminRouteGuard>
+              } />
+              <Route path="payouts" element={
+                <AdminRouteGuard permission="manage_payouts">
+                  <PayoutProvider><RewardPayout /></PayoutProvider>
+                </AdminRouteGuard>
+              } />
+              <Route path="posts" element={
+                <AdminRouteGuard permission="moderate_posts"><AdminContent /></AdminRouteGuard>
+              } />
+              <Route path="audit-logs" element={
+                <AdminRouteGuard permission="view_audit_logs"><AdminAuditLogs /></AdminRouteGuard>
+              } />
+              <Route path="admins" element={
+                <AdminRouteGuard permission="manage_admins"><AdminAdmins /></AdminRouteGuard>
+              } />
+              <Route path="logs" element={<AdminLogs />} />
+              <Route path="trust" element={<AdminTrustDashboard />} />
 
-            {/* ── Super Admin only ── */}
-            <Route path="create-admin" element={<SuperAdminRoute><AdminCreateUser /></SuperAdminRoute>} />
-            <Route path="roles" element={<SuperAdminRoute><AdminRoleManagement /></SuperAdminRoute>} />
-            </Route>
+              {/* ── Super Admin only ── */}
+              <Route path="create-admin" element={<SuperAdminRoute><AdminCreateUser /></SuperAdminRoute>} />
+              <Route path="roles" element={<SuperAdminRoute><AdminRoleManagement /></SuperAdminRoute>} />
+              </Route>
 
-            {/* Fallback */}
-            <Route path="*" element={<Navigate to="/" replace />} />
+              {/* Fallback */}
+              <Route path="*" element={<Navigate to="/" replace />} />
 
-            {/* Wallet */}
-            <Route path="wallet-report" element={
-              <AdminRouteGuard permission="view_reports"><WalletReport /></AdminRouteGuard>
-            } />
+              {/* Wallet */}
+              <Route path="wallet-report" element={
+                <AdminRouteGuard permission="view_reports"><WalletReport /></AdminRouteGuard>
+              } />
 
-        </Routes>
-      </AdminKycProvider>
+          </Routes>
+        </AdminKycProvider>
+      </PayoutNotificationProvider>
     </PermissionsProvider>
   );
 }

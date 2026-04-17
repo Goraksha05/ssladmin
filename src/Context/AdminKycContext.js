@@ -68,7 +68,16 @@ export const AdminKycProvider = ({ children }) => {
       // The server handles 'join_kyc_admin' in kycSocket.handleKycAdminJoin()
       // (called from onConnection.js) AND auto-joins isAdmin sockets in
       // IOsocket.js on connect — so admins receive events through either path.
-      safeEmit('join_kyc_admin');
+      const unsubConnect = onSocketEvent("connect", () => {
+        safeEmit("join_kyc_admin");
+      });
+
+      return () => {
+        unsubConnect();
+        unsubAdminUpdate();
+        unsubBulkUpdate();
+        unsubStatsUpdate();
+      };
     });
 
     // ── Subscribe to KYC events via onSocketEvent() ───────────────────────
