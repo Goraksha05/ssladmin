@@ -2,57 +2,21 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Global payout state for the Admin Financial section.
 //
-// Alignment with project conventions:
+// CHANGES FROM PREVIOUS VERSION:
 //
-//   AUTH GATE
-//   • Consumes useAuth() from AuthContext (same import path used everywhere).
-//   • AuthContext's `loading` is destructured as `authLoading` to avoid
-//     shadowing the local payoutLoading map when both are in scope.
-//   • Fetches are gated on  !authLoading && isAuthenticated && user?.isAdmin
-//     — mirrors the exact guard in PermissionsContext.fetchMe().
-//   • Stale data is cleared when the user is not authenticated, matching the
-//     reset pattern in PermissionsContext.
+//   NEW — unredeemedWallets data source.
+//     Fetches GET /api/admin/payouts/unredeemed-wallets which returns users who
+//     have totalGroceryCoupons > 0 but no active grocery_redeem Payout in flight.
+//     This is the "hasn't redeemed yet" list, as opposed to pendingClaims which
+//     is the "has submitted a request, admin needs to process" list.
 //
-//   API / ERROR HANDLING
-//   • All HTTP calls use apiRequest (utils/apiRequest.js).
-//   • apiRequest's response interceptor fires toast.error for every non-2xx
-//     status (401 / 403 / 5xx / network).  To avoid double-toasting, catch
-//     blocks here only call console.error — never toast.error.
-//   • 401 token clearing is handled exclusively by handleAuthError and the
-//     app-level auth flow.  This context never touches localStorage.
-//   • Success toasts are fired here because apiRequest only handles errors —
-//     2xx success messaging is the caller's responsibility.
+//   NEW — walletFilters / walletPagination / walletPage state for the
+//     "Unredeemed Wallets" tab in RewardPayout.js.
 //
-//   LOADING STATE
-//   • Exported as `loading` (key in context value) so consumers that already
-//     destructure `{ loading }` from usePayouts() need no changes.
-//   • The internal state variable is named `payoutLoading` to prevent
-//     collision with AuthContext's `loading` boolean in the same scope.
+//   NEW — walletSummary: KPI totals (totalUnredeemedINR, eligibleToRedeem,
+//     missingBankDetails) returned by the aggregate in the backend.
 //
-// Exposes:
-//   payouts          — paginated Payout documents
-//   pendingClaims    — RewardClaims not yet paid out
-//   summary          — INR dashboard totals from /payouts/summary
-//   recentPaid       — last 5 paid payouts (from summary endpoint)
-//   userPayouts      — per-user history cache { [userId]: { user, payouts, totals } }
-//   pagination       — { page, pages, total, limit } for payouts list
-//   claimPagination  — same shape for pending-claims list
-//   filters          — active payout query filters
-//   claimFilters     — active pending-claims filters
-//   loading          — { payouts, claims, summary, action, bulk, user }
-//
-// Actions:
-//   setFilters(partial)         — merge filters + reset to page 1
-//   clearFilters()              — reset all payout filters
-//   setClaimFilters(partial)    — merge claim filters + reset to claim page 1
-//   clearClaimFilters()         — reset all claim filters
-//   setPage(n)                  — navigate payouts list
-//   setClaimPage(n)             — navigate pending-claims list
-//   processPayout(body)         — POST /api/admin/payouts/process
-//   bulkProcess(claimIds, opts) — POST /api/admin/payouts/bulk-process
-//   updateStatus(id, body)      — PATCH /api/admin/payouts/:id/status
-//   fetchUserPayouts(id, force) — GET /api/admin/payouts/user/:id (cached)
-//   refresh()                   — re-fetch all three data sources in parallel
+// All other behaviour is unchanged.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import {
@@ -91,52 +55,63 @@ const DEFAULT_CLAIM_FILTERS = {
   bankOnly: false,
 };
 
+const DEFAULT_WALLET_FILTERS = {
+  minBalance: '',
+  kycStatus:  '',
+  bankOnly:   false,
+  search:     '',
+};
+
 const DEFAULT_PAGINATION = { page: 1, pages: 1, total: 0, limit: 25 };
 
 // ── Provider ──────────────────────────────────────────────────────────────────
 export const PayoutProvider = ({ children }) => {
 
-  // ── Auth gate — mirrors PermissionsContext pattern ─────────────────────────
-  // `loading` from AuthContext renamed to `authLoading` to avoid shadowing the
-  // local payoutLoading map and to be explicit about which context it belongs to.
   const { isAuthenticated, user, loading: authLoading } = useAuth();
   const isAdmin = !!user?.isAdmin;
 
   // ── Data ───────────────────────────────────────────────────────────────────
-  const [payouts,       setPayouts]       = useState([]);
-  const [pendingClaims, setPendingClaims] = useState([]);
-  const [summary,       setSummary]       = useState(null);
-  const [recentPaid,    setRecentPaid]    = useState([]);
-  // Lazy cache keyed by userId: { [userId]: { user, payouts, totals } }
-  const [userPayouts,   setUserPayouts]   = useState({});
+  const [payouts,            setPayouts]            = useState([]);
+  const [pendingClaims,      setPendingClaims]      = useState([]);
+  const [summary,            setSummary]            = useState(null);
+  const [recentPaid,         setRecentPaid]         = useState([]);
+  const [userPayouts,        setUserPayouts]        = useState({});
+
+  // NEW: unredeemed wallets — users with coupon balance but no active redemption
+  const [unredeemedWallets,  setUnredeemedWallets]  = useState([]);
+  const [walletSummary,      setWalletSummary]      = useState(null);
 
   // ── Pagination ─────────────────────────────────────────────────────────────
-  const [pagination,      setPagination]      = useState(DEFAULT_PAGINATION);
-  const [claimPagination, setClaimPagination] = useState(DEFAULT_PAGINATION);
+  const [pagination,         setPagination]         = useState(DEFAULT_PAGINATION);
+  const [claimPagination,    setClaimPagination]    = useState(DEFAULT_PAGINATION);
+  const [walletPagination,   setWalletPagination]   = useState(DEFAULT_PAGINATION); // NEW
 
   // ── Filters + page cursors ─────────────────────────────────────────────────
   const [filters,      setFiltersState]      = useState(DEFAULT_FILTERS);
   const [claimFilters, setClaimFiltersState] = useState(DEFAULT_CLAIM_FILTERS);
+  const [walletFilters, setWalletFiltersState] = useState(DEFAULT_WALLET_FILTERS); // NEW
   const [page,         setPage]              = useState(1);
   const [claimPage,    setClaimPage]         = useState(1);
+  const [walletPage,   setWalletPage]        = useState(1); // NEW
 
   // ── Loading map ────────────────────────────────────────────────────────────
-  // Stored as `payoutLoading` locally; exposed as `loading` in context value
-  // so existing consumers destructure it without changes.
   const [payoutLoading, setPayoutLoading] = useState({
-    payouts: false,
-    claims:  false,
-    summary: false,
-    action:  false,  // processPayout / updateStatus
-    bulk:    false,  // bulkProcess
-    user:    false,  // fetchUserPayouts
+    payouts:  false,
+    claims:   false,
+    summary:  false,
+    wallets:  false,   // NEW — for the unredeemed wallets tab
+    action:   false,
+    bulk:     false,
+    user:     false,
   });
 
   // Stable refs so callbacks don't capture stale filter snapshots
-  const filtersRef      = useRef(filters);
-  const claimFiltersRef = useRef(claimFilters);
-  useEffect(() => { filtersRef.current      = filters;      }, [filters]);
-  useEffect(() => { claimFiltersRef.current = claimFilters; }, [claimFilters]);
+  const filtersRef       = useRef(filters);
+  const claimFiltersRef  = useRef(claimFilters);
+  const walletFiltersRef = useRef(walletFilters);
+  useEffect(() => { filtersRef.current       = filters;       }, [filters]);
+  useEffect(() => { claimFiltersRef.current  = claimFilters;  }, [claimFilters]);
+  useEffect(() => { walletFiltersRef.current = walletFilters; }, [walletFilters]);
 
   // ── Internal helpers ───────────────────────────────────────────────────────
   const setLoad = useCallback((key, val) => {
@@ -161,11 +136,17 @@ export const PayoutProvider = ({ children }) => {
     return params.toString();
   }, []);
 
+  // NEW: build query string for unredeemed-wallets endpoint
+  const buildWalletParams = useCallback((p, wf) => {
+    const params = new URLSearchParams({ page: p, limit: 25 });
+    if (wf.minBalance) params.set('minBalance', wf.minBalance);
+    if (wf.kycStatus)  params.set('kycStatus',  wf.kycStatus);
+    if (wf.bankOnly)   params.set('bankOnly',   'true');
+    if (wf.search)     params.set('search',     wf.search);
+    return params.toString();
+  }, []);
+
   // ── Fetchers ───────────────────────────────────────────────────────────────
-  // IMPORTANT: catch blocks only call console.error.
-  // apiRequest's response interceptor (apiRequest.js) already fires
-  // toast.error for every non-2xx response — adding toast.error here would
-  // show the user two identical error notifications for the same failure.
 
   const fetchPayouts = useCallback(async (p = 1, f = filtersRef.current) => {
     setLoad('payouts', true);
@@ -210,20 +191,37 @@ export const PayoutProvider = ({ children }) => {
     }
   }, [setLoad]);
 
+  // NEW: fetch users with balance but no active redemption
+  const fetchUnredeemedWallets = useCallback(async (
+    p  = 1,
+    wf = walletFiltersRef.current,
+  ) => {
+    setLoad('wallets', true);
+    try {
+      const res = await apiRequest.get(
+        `/api/admin/payouts/unredeemed-wallets?${buildWalletParams(p, wf)}`
+      );
+      setUnredeemedWallets(res.data.users        ?? []);
+      setWalletPagination( res.data.pagination   ?? DEFAULT_PAGINATION);
+      setWalletSummary(    res.data.summary       ?? null);
+    } catch (err) {
+      console.error('[PayoutContext] fetchUnredeemedWallets', err);
+    } finally {
+      setLoad('wallets', false);
+    }
+  }, [buildWalletParams, setLoad]);
+
   // ── Auth-gated reactive fetches ────────────────────────────────────────────
-  // Wait until AuthContext has finished hydrating (authLoading === false)
-  // before issuing any requests.  This mirrors PermissionsContext.useEffect
-  // which checks  !isAuthenticated || !user?.isAdmin  before bailing early.
 
   useEffect(() => {
     if (authLoading) return;
     if (!isAuthenticated || !isAdmin) {
-      // Clear stale data when the admin logs out — same reset pattern as
-      // PermissionsContext clears permissions on !isAuthenticated
       setPayouts([]);
       setPendingClaims([]);
       setSummary(null);
       setRecentPaid([]);
+      setUnredeemedWallets([]);
+      setWalletSummary(null);
       return;
     }
     fetchSummary();
@@ -232,12 +230,18 @@ export const PayoutProvider = ({ children }) => {
   useEffect(() => {
     if (authLoading || !isAuthenticated || !isAdmin) return;
     fetchPayouts(page, filtersRef.current);
-  }, [page, filters, authLoading, isAuthenticated, isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [page, filters, authLoading, isAuthenticated, isAdmin]); // eslint-disable-line
 
   useEffect(() => {
     if (authLoading || !isAuthenticated || !isAdmin) return;
     fetchPendingClaims(claimPage, claimFiltersRef.current);
-  }, [claimPage, claimFilters, authLoading, isAuthenticated, isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [claimPage, claimFilters, authLoading, isAuthenticated, isAdmin]); // eslint-disable-line
+
+  // NEW: fetch unredeemed wallets when walletPage or walletFilters change
+  useEffect(() => {
+    if (authLoading || !isAuthenticated || !isAdmin) return;
+    fetchUnredeemedWallets(walletPage, walletFiltersRef.current);
+  }, [walletPage, walletFilters, authLoading, isAuthenticated, isAdmin]); // eslint-disable-line
 
   // ── Public filter setters ──────────────────────────────────────────────────
   const setFilters = useCallback((partial) => {
@@ -260,62 +264,42 @@ export const PayoutProvider = ({ children }) => {
     setClaimPage(1);
   }, []);
 
+  // NEW: wallet filter setters
+  const setWalletFilters = useCallback((partial) => {
+    setWalletFiltersState(prev => ({ ...prev, ...partial }));
+    setWalletPage(1);
+  }, []);
+
+  const clearWalletFilters = useCallback(() => {
+    setWalletFiltersState(DEFAULT_WALLET_FILTERS);
+    setWalletPage(1);
+  }, []);
+
   // ── Actions ────────────────────────────────────────────────────────────────
 
-  /**
-   * POST /api/admin/payouts/process
-   * Create a payout for a single RewardClaim.
-   *
-   * Toast strategy:
-   *   success → toast.success fired here (apiRequest only handles errors)
-   *   error   → already toasted by apiRequest interceptor; we only log
-   *
-   * @param {{ claimId: string, status?: string, transactionRef?: string, notes?: string }} body
-   * @returns {object|null} created payout or null on error
-   */
   const processPayout = useCallback(async (body) => {
     setLoad('action', true);
     try {
       const res = await apiRequest.post('/api/admin/payouts/process', body);
-
       toast.success(res.data.message || 'Payout processed successfully');
-
-      // Optimistically remove the claim from the pending list immediately
       setPendingClaims(prev =>
         prev.filter(c => String(c._id) !== String(body.claimId))
       );
-
-      // Re-sync summary totals and the payouts list
       await Promise.all([
         fetchSummary(),
         fetchPayouts(page, filtersRef.current),
+        // Refresh the unredeemed wallets list — the user may now have a payout in flight
+        fetchUnredeemedWallets(walletPage, walletFiltersRef.current),
       ]);
-
       return res.data.payout;
     } catch (err) {
-      // apiRequest interceptor already showed the error toast — log only
       console.error('[PayoutContext] processPayout', err);
       return null;
     } finally {
       setLoad('action', false);
     }
-  }, [page, fetchSummary, fetchPayouts, setLoad]);
+  }, [page, walletPage, fetchSummary, fetchPayouts, fetchUnredeemedWallets, setLoad]);
 
-  /**
-   * PATCH /api/admin/payouts/:payoutId/status
-   * Transition a payout through its lifecycle.
-   *
-   * Allowed transitions (enforced by the controller, mirrored here for UX):
-   *   pending    → processing | paid | on_hold | failed
-   *   processing → paid | failed | on_hold
-   *   failed     → pending  (retry)
-   *   on_hold    → pending  (resume)
-   *   paid       → (terminal)
-   *
-   * @param {string} payoutId
-   * @param {{ status: string, transactionRef?: string, failureReason?: string, notes?: string }} body
-   * @returns {object|null} updated payout or null on error
-   */
   const updateStatus = useCallback(async (payoutId, body) => {
     setLoad('action', true);
     try {
@@ -323,15 +307,10 @@ export const PayoutProvider = ({ children }) => {
         `/api/admin/payouts/${payoutId}/status`,
         body
       );
-
       toast.success(res.data.message || 'Payout status updated');
-
-      // Patch updated record in-place without a full list refetch
       setPayouts(prev =>
         prev.map(p => String(p._id) === String(payoutId) ? res.data.payout : p)
       );
-
-      // Bust the per-user cache entry so the next fetchUserPayouts is fresh
       const payoutUser = res.data.payout?.user;
       if (payoutUser) {
         setUserPayouts(prev => {
@@ -342,8 +321,12 @@ export const PayoutProvider = ({ children }) => {
           return rest;
         });
       }
-
       await fetchSummary();
+      // If a grocery_redeem payout was just marked 'paid' or 'failed',
+      // the user may now appear in the unredeemed-wallets list again.
+      if (body.status === 'paid' || body.status === 'failed') {
+        fetchUnredeemedWallets(walletPage, walletFiltersRef.current);
+      }
       return res.data.payout;
     } catch (err) {
       console.error('[PayoutContext] updateStatus', err);
@@ -351,23 +334,10 @@ export const PayoutProvider = ({ children }) => {
     } finally {
       setLoad('action', false);
     }
-  }, [fetchSummary, setLoad]);
+  }, [walletPage, fetchSummary, fetchUnredeemedWallets, setLoad]);
 
-  /**
-   * POST /api/admin/payouts/bulk-process
-   * Batch payout creation — up to 100 claims per request.
-   * Server returns 207 Multi-Status, which axios treats as a success
-   * (status < 400), so no error handling needed for the 207 case.
-   *
-   * @param {string[]} claimIds
-   * @param {{ status?: 'processing'|'paid', notes?: string }} opts
-   * @returns {{ processed, skipped, failed, totalINRDispatched }|null}
-   */
   const bulkProcess = useCallback(async (claimIds, opts = {}) => {
-    if (!claimIds?.length) {
-      toast.warn('No claims selected');
-      return null;
-    }
+    if (!claimIds?.length) { toast.warn('No claims selected'); return null; }
     setLoad('bulk', true);
     try {
       const res = await apiRequest.post('/api/admin/payouts/bulk-process', {
@@ -375,23 +345,19 @@ export const PayoutProvider = ({ children }) => {
         status: opts.status || 'processing',
         notes:  opts.notes  || '',
       });
-
       const { results, totalINRDispatched, message } = res.data;
       toast.success(message || 'Bulk process complete');
-
-      // Remove successfully processed claims from the pending list
       const processedSet = new Set(
         (results?.processed ?? []).map(r => String(r.claimId))
       );
       setPendingClaims(prev =>
         prev.filter(c => !processedSet.has(String(c._id)))
       );
-
       await Promise.all([
         fetchSummary(),
         fetchPayouts(page, filtersRef.current),
+        fetchUnredeemedWallets(walletPage, walletFiltersRef.current),
       ]);
-
       return { ...(results ?? {}), totalINRDispatched };
     } catch (err) {
       console.error('[PayoutContext] bulkProcess', err);
@@ -399,25 +365,15 @@ export const PayoutProvider = ({ children }) => {
     } finally {
       setLoad('bulk', false);
     }
-  }, [page, fetchSummary, fetchPayouts, setLoad]);
+  }, [page, walletPage, fetchSummary, fetchPayouts, fetchUnredeemedWallets, setLoad]);
 
-  /**
-   * GET /api/admin/payouts/user/:userId
-   * Full payout history for one user.  Memoised by userId; pass force=true
-   * to bypass the cache (e.g. after a status update on that user's payout).
-   *
-   * @param {string}  userId
-   * @param {boolean} [force=false]
-   * @returns {{ user, payouts, totals }|null}
-   */
   const fetchUserPayouts = useCallback(async (userId, force = false) => {
     if (!userId) return null;
     if (!force && userPayouts[userId]) return userPayouts[userId];
-
     setLoad('user', true);
     try {
       const res  = await apiRequest.get(`/api/admin/payouts/user/${userId}`);
-      const data = res.data; // { user, payouts, totals }
+      const data = res.data;
       setUserPayouts(prev => ({ ...prev, [userId]: data }));
       return data;
     } catch (err) {
@@ -428,16 +384,15 @@ export const PayoutProvider = ({ children }) => {
     }
   }, [userPayouts, setLoad]);
 
-  /**
-   * Re-fetch all three primary data sources simultaneously.
-   */
   const refresh = useCallback(async () => {
     await Promise.all([
       fetchSummary(),
       fetchPayouts(page, filtersRef.current),
       fetchPendingClaims(claimPage, claimFiltersRef.current),
+      fetchUnredeemedWallets(walletPage, walletFiltersRef.current),
     ]);
-  }, [fetchSummary, fetchPayouts, fetchPendingClaims, page, claimPage]);
+  }, [fetchSummary, fetchPayouts, fetchPendingClaims, fetchUnredeemedWallets,
+      page, claimPage, walletPage]);
 
   // ── Context value ──────────────────────────────────────────────────────────
   const value = {
@@ -447,14 +402,19 @@ export const PayoutProvider = ({ children }) => {
     summary,
     recentPaid,
     userPayouts,
+    unredeemedWallets,   // NEW
+    walletSummary,       // NEW
 
     // Pagination
     pagination,
     claimPagination,
+    walletPagination,    // NEW
     page,
     claimPage,
+    walletPage,          // NEW
     setPage,
     setClaimPage,
+    setWalletPage,       // NEW
 
     // Filters
     filters,
@@ -463,9 +423,11 @@ export const PayoutProvider = ({ children }) => {
     claimFilters,
     setClaimFilters,
     clearClaimFilters,
+    walletFilters,       // NEW
+    setWalletFilters,    // NEW
+    clearWalletFilters,  // NEW
 
-    // Loading — exposed as `loading` so consumer destructuring is unchanged;
-    // internally stored as payoutLoading to avoid collision with AuthContext.
+    // Loading
     loading: payoutLoading,
 
     // Actions

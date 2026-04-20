@@ -1,34 +1,9 @@
 // Services/AuthService.js
-//
-// FIXES IN THIS VERSION:
-//
-//   1. LOGOUT KEY COVERAGE — AuthService.logout() now clears ALL four token
-//      keys that could ever hold a JWT: 'authtoken', 'token', 'authToken',
-//      'accessToken'. The previous version only cleared 'token' and 'User',
-//      leaving 'authtoken' (written by AuthContext / apiRequest) behind.
-//      That surviving key was picked up by AuthContext's session-restore on
-//      the next mount, re-authenticating the admin without a new login.
-//
-//   2. TOKEN STORAGE KEY ALIGNMENT — login() and signup() now store the JWT
-//      under 'authtoken' instead of 'token'. This matches:
-//        • apiRequest.js  → reads keys in order ['authtoken', 'token', ...]
-//        • AuthContext.js → restores from localStorage.getItem('authtoken') first
-//      Previously the mismatch meant apiRequest sent no Authorization header
-//      until 'authtoken' was separately set by AuthContext.
-//
-//   3. STRICT HTTP STATUS CHECK IN getUser() — previously the function checked
-//      data.success after fetch() but never checked res.ok. A 401 or 403 from
-//      the backend (expired / invalid token) would not be caught, keeping the
-//      admin "logged in" with a dead token. Now: if res.ok is false the
-//      function calls clearSession() to wipe all keys and returns null, which
-//      causes AuthProvider to render the login page.
-//
-//   4. DEAD CODE REMOVED — the `if (!token) return null` guard inside the
-//      old getUser() appeared AFTER the await fetch(), making it unreachable.
-//      Removed.
 
 const API_URL =
-  `${process.env.REACT_APP_BACKEND_URL ?? process.env.REACT_APP_SERVER_URL}/api/admin`;
+  `${process.env.REACT_APP_BACKEND_URL ?? process.env.REACT_APP_BACKEND_URL}/api/admin` || 
+  `${process.env.REACT_APP_SERVER_URL ?? process.env.REACT_APP_SERVER_URL}/api/admin` ||
+  '';
 
 // ── Token key — single source of truth ───────────────────────────────────────
 // Matches the first key apiRequest.js checks, and what AuthContext restores.
@@ -36,14 +11,14 @@ const TOKEN_KEY = 'authtoken';
 
 // Every key that might hold a JWT from any version of this file.
 // ALL must be wiped on logout so no stale token survives.
-const ALL_TOKEN_KEYS = ['authtoken', 'token', 'authToken', 'accessToken'];
+const ALL_TOKEN_KEYS = ['authtoken', 'token', 'authToken', 'accessToken', 'User', 'refreshToken', 'notifications'];
 
 const cleanToken = (raw) => (raw ?? '').trim().replace(/\s/g, '');
 
 // ── Shared session-clear helper ───────────────────────────────────────────────
 // Used by logout() and by getUser() when the backend rejects the token.
 function clearSession() {
-  ALL_TOKEN_KEYS.forEach(k => localStorage.removeItem(k));
+  ALL_TOKEN_KEYS.forEach((k) => localStorage.removeItem(k));
   localStorage.removeItem('User');
 }
 

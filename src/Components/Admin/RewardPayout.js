@@ -2,26 +2,31 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Payout Management panel — sub-section of AdminFinancial.
 //
-// Alignment with project conventions:
+// CHANGES FROM PREVIOUS VERSION:
 //
-//   • Consumes PayoutContext via usePayouts() — never calls apiRequest directly.
-//   • Action handlers (processPayout, updateStatus, bulkProcess) return null on
-//     failure; error toasts have already been fired by apiRequest's interceptor
-//     so modal close logic checks `if (ok)` rather than catching/re-toasting.
-//   • ProtectedRoute / AdminRoute auth guards live in App.js — this component
-//     renders only inside an already-guarded route subtree, so it performs no
-//     auth checks of its own (mirrors every other Admin/* component).
-//   • `loading` from usePayouts() is a map { payouts, claims, summary,
-//     action, bulk, user } — not a boolean — so all disabled/spinner checks
-//     reference the correct key (e.g. loading.action, not loading).
-//   • Export helpers (exportXLSX / exportCSV / exportPDF) are pure local
-//     utilities that don't go through apiRequest, so they may call toast
-//     directly — this is intentional and does not create double-toast issues.
+//   NEW TAB — "Unredeemed Wallets" (4th tab, between Pending Claims and Summary).
+//     Shows users who have totalGroceryCoupons > 0 but have NOT yet submitted a
+//     grocery redemption request (or whose previous request was completed and
+//     they now have new balance again).
 //
-// Tabs:
-//   1. Summary        — INR KPIs, reward-type / plan charts, recent-paid feed
-//   2. All Payouts    — filterable paginated list with inline status transitions
-//   3. Pending Claims — enriched unpaid claims, single + bulk process flows
+//     This is the "proactive" view for admins — instead of waiting for users to
+//     initiate a redemption, the admin can see who is sitting on unredeemed
+//     balance and take action (e.g. send a nudge notification).
+//
+//     Distinct from "Pending Claims" which shows grocery_redeem Payout records
+//     already submitted by users and awaiting admin processing.
+//
+//   TYPE_OPTIONS in the "Pending Claims" filter bar now includes
+//   'grocery_redeem' so admins can isolate self-submitted redemption requests.
+//
+//   All modals, export helpers, and Summary/Payouts/PendingClaims tabs are
+//   unchanged.
+//
+// Tab order:
+//   1. Summary          — INR KPIs, charts, recent-paid feed
+//   2. All Payouts      — all Payout documents, filterable, inline status edit
+//   3. Pending Claims   — RewardClaims with no Payout yet (all types incl. grocery_redeem)
+//   4. Unredeemed Wallets — users with wallet balance who haven't redeemed yet
 // ─────────────────────────────────────────────────────────────────────────────
 
 import React, { useState } from 'react';
@@ -39,7 +44,7 @@ import 'jspdf-autotable';
 import { usePayouts } from '../../Context/PayoutContext';
 import {
   PageHeader, Card, Btn, Badge, Select,
-  Table, Pagination, DateRangeFilter, AdminUIStyles,
+  Table, Pagination, DateRangeFilter, AdminUIStyles, SearchBar,
 } from './AdminUI';
 
 import './RewardPayout.css';
@@ -57,11 +62,21 @@ const STATUS_OPTIONS = [
   { value: 'on_hold',    label: 'On Hold' },
 ];
 
+// Updated: includes grocery_redeem so admins can filter grocery requests
 const TYPE_OPTIONS = [
-  { value: '',         label: 'All Types' },
-  { value: 'post',     label: 'Post' },
-  { value: 'referral', label: 'Referral' },
-  { value: 'streak',   label: 'Streak' },
+  { value: '',              label: 'All Types' },
+  { value: 'post',          label: 'Post Reward' },
+  { value: 'referral',      label: 'Referral Reward' },
+  { value: 'streak',        label: 'Streak Reward' },
+  { value: 'grocery_redeem',label: 'Grocery Redemption' },
+];
+
+const KYC_STATUS_OPTIONS = [
+  { value: '',            label: 'All KYC Statuses' },
+  { value: 'verified',    label: 'Verified' },
+  { value: 'submitted',   label: 'Under Review' },
+  { value: 'rejected',    label: 'Rejected' },
+  { value: 'not_started', label: 'Not Started' },
 ];
 
 const PLAN_LABELS = {
@@ -70,10 +85,9 @@ const PLAN_LABELS = {
   '4500': 'Gold ₹4500',
 };
 
-const TYPE_COLORS = { post: '#4f46e5', referral: '#10b981', streak: '#f59e0b' };
-const PLAN_COLORS = { '2500': '#10b981', '3500': '#4f46e5', '4500': '#f59e0b' };
+const TYPE_COLORS  = { post: '#4f46e5', referral: '#10b981', streak: '#f59e0b', grocery_redeem: '#059669' };
+const PLAN_COLORS  = { '2500': '#10b981', '3500': '#4f46e5', '4500': '#f59e0b' };
 
-// Lifecycle transitions — mirrors financeAndPayoutController.js TRANSITIONS map
 const TRANSITIONS = {
   pending:    ['processing', 'paid', 'on_hold', 'failed'],
   processing: ['paid', 'failed', 'on_hold'],
@@ -101,8 +115,6 @@ const formatDate = (d) =>
 
 // ─────────────────────────────────────────────────────────────────────────────
 // EXPORT HELPERS
-// These are local utility functions — they do not go through apiRequest and
-// therefore may call toast directly without risking double-notification.
 // ─────────────────────────────────────────────────────────────────────────────
 
 function exportXLSX(rows, name) {
@@ -186,6 +198,225 @@ const BreakdownCard = ({ breakdown = {}, totalAmountINR }) => (
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// IFSC → BANK NAME LOOKUP
+// Derives the bank name from the first 4 characters of an IFSC code.
+// Covers all major Indian scheduled commercial banks.
+// Returns null if the code is unrecognised (upstream can fall back to the raw code).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const IFSC_BANK_MAP = {
+  // Public sector banks
+  SBIN: 'State Bank of India',
+  SBHY: 'State Bank of Hyderabad',
+  SBMY: 'State Bank of Mysore',
+  SBTR: 'State Bank of Travancore',
+  SBPA: 'State Bank of Patiala',
+  BKID: 'Bank of India',
+  BARB: 'Bank of Baroda',
+  CNRB: 'Canara Bank',
+  PUNB: 'Punjab National Bank',
+  UBIN: 'Union Bank of India',
+  ANDB: 'Andhra Bank',
+  ALLA: 'Allahabad Bank',
+  VIJB: 'Vijaya Bank',
+  CORP: 'Corporation Bank',
+  ORBC: 'Oriental Bank of Commerce',
+  UTBI: 'United Bank of India',
+  IOBA: 'Indian Overseas Bank',
+  IDIB: 'Indian Bank',
+  UCBA: 'UCO Bank',
+  MAHB: 'Bank of Maharashtra',
+  PSIB: 'Punjab & Sind Bank',
+  SYNC: 'Syndicate Bank',
+  DENA: 'Dena Bank',
+  // Private sector banks
+  HDFC: 'HDFC Bank',
+  ICIC: 'ICICI Bank',
+  UTIB: 'Axis Bank',
+  KKBK: 'Kotak Mahindra Bank',
+  YESB: 'Yes Bank',
+  INDB: 'IndusInd Bank',
+  IDFB: 'IDFC First Bank',
+  FDRL: 'Federal Bank',
+  KVBL: 'Karur Vysya Bank',
+  DLXB: 'Dhanlaxmi Bank',
+  CSBK: 'Catholic Syrian Bank',
+  SRCB: 'Saraswat Bank',
+  JSFB: 'Jana Small Finance Bank',
+  AUBL: 'AU Small Finance Bank',
+  USFB: 'Ujjivan Small Finance Bank',
+  ESAF: 'ESAF Small Finance Bank',
+  ESFB: 'Equitas Small Finance Bank',
+  SFBL: 'Suryoday Small Finance Bank',
+  NESF: 'North East Small Finance Bank',
+  FINF: 'Fincare Small Finance Bank',
+  SIBL: 'South Indian Bank',
+  LAVB: 'Lakshmi Vilas Bank',
+  NKGS: 'NKGSB Co-operative Bank',
+  KARB: 'Karnataka Bank',
+  KBKB: 'Kalyan Janata Sahakari Bank',
+  TMBL: 'Tamilnad Mercantile Bank',
+  DCBL: 'DCB Bank',
+  RBLB: 'RBL Bank',
+  BDBL: 'Bandhan Bank',
+  IBKL: 'IDBI Bank',
+  CIUB: 'City Union Bank',
+  // Payment banks & neo banks
+  AIRP: 'Airtel Payments Bank',
+  FINO: 'Fino Payments Bank',
+  PAYTM: 'Paytm Payments Bank',
+  NSDL: 'NSDL Payments Bank',
+  IPOS: 'India Post Payments Bank',
+  // Foreign banks (common in India)
+  CITI: 'Citibank',
+  HSBC: 'HSBC Bank',
+  DEUT: 'Deutsche Bank',
+  SCBL: 'Standard Chartered Bank',
+  BOFA: 'Bank of America',
+  BNPA: 'BNP Paribas',
+  DBSS: 'DBS Bank',
+};
+
+/**
+ * Returns the bank name from an IFSC code, or null if unrecognised.
+ * IFSC format: AAAA0BBBBBB (4-char bank code + 0 + 6-char branch code)
+ */
+function bankNameFromIFSC(ifsc) {
+  if (!ifsc || typeof ifsc !== 'string') return null;
+  const code = ifsc.slice(0, 4).toUpperCase();
+  return IFSC_BANK_MAP[code] || null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BANK DETAILS CARD
+// Shows full, unmasked account number, IFSC code, bank name (derived from
+// IFSC prefix), and PAN number — for admin use only.
+// Sources:
+//   • payout.bankDetails  — snapshot stored at payout creation time
+//   • user.bankDetails    — live from the User document (pending-claims modal)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const BankDetailsCard = ({ bankDetails, title = 'Bank Details' }) => {
+  if (!bankDetails) return null;
+
+  const { accountNumber, ifscCode, panNumber } = bankDetails;
+  const hasAny = accountNumber || ifscCode || panNumber;
+  if (!hasAny) return null;
+
+  const bankName = bankNameFromIFSC(ifscCode);
+
+  return (
+    <div style={{
+      marginTop: '.875rem',
+      border: '1px solid var(--border)',
+      borderRadius: 10,
+      overflow: 'hidden',
+    }}>
+      {/* Header */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: '.5rem',
+        padding: '.5rem .875rem',
+        background: 'rgba(79,70,229,.07)',
+        borderBottom: '1px solid var(--border)',
+      }}>
+        <span style={{ fontSize: '1rem' }}>🏦</span>
+        <span style={{
+          fontWeight: 700, fontSize: '.8rem',
+          letterSpacing: '.04em', color: 'var(--text-primary)',
+          textTransform: 'uppercase',
+        }}>
+          {title}
+        </span>
+        {bankName && (
+          <span style={{
+            marginLeft: 'auto',
+            fontSize: '.75rem', fontWeight: 600,
+            color: '#4f46e5',
+            background: 'rgba(79,70,229,.1)',
+            padding: '.15rem .5rem',
+            borderRadius: 5,
+          }}>
+            {bankName}
+          </span>
+        )}
+      </div>
+
+      {/* Fields */}
+      <div style={{ padding: '.625rem .875rem', display: 'flex', flexDirection: 'column', gap: '.45rem' }}>
+
+        {accountNumber && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+            <span style={{ fontSize: '.775rem', color: 'var(--text-secondary)', minWidth: 110 }}>
+              Account No.
+            </span>
+            <span style={{
+              fontFamily: '"DM Mono", monospace',
+              fontSize: '.875rem', fontWeight: 600,
+              letterSpacing: '.08em', color: 'var(--text-primary)',
+              userSelect: 'all',
+            }}>
+              {accountNumber}
+            </span>
+          </div>
+        )}
+
+        {ifscCode && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+            <span style={{ fontSize: '.775rem', color: 'var(--text-secondary)', minWidth: 110 }}>
+              IFSC Code
+            </span>
+            <span style={{
+              fontFamily: '"DM Mono", monospace',
+              fontSize: '.875rem', fontWeight: 600,
+              letterSpacing: '.08em', color: 'var(--text-primary)',
+              userSelect: 'all',
+            }}>
+              {ifscCode.toUpperCase()}
+            </span>
+          </div>
+        )}
+
+        {bankName && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+            <span style={{ fontSize: '.775rem', color: 'var(--text-secondary)', minWidth: 110 }}>
+              Bank Name
+            </span>
+            <span style={{
+              fontSize: '.85rem', fontWeight: 500,
+              color: 'var(--text-primary)',
+            }}>
+              {bankName}
+            </span>
+          </div>
+        )}
+
+        {panNumber && (
+          <div style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+            paddingTop: '.35rem',
+            borderTop: '1px dashed var(--border)',
+            marginTop: '.1rem',
+          }}>
+            <span style={{ fontSize: '.775rem', color: 'var(--text-secondary)', minWidth: 110 }}>
+              PAN Number
+            </span>
+            <span style={{
+              fontFamily: '"DM Mono", monospace',
+              fontSize: '.875rem', fontWeight: 600,
+              letterSpacing: '.12em', color: 'var(--text-primary)',
+              userSelect: 'all',
+            }}>
+              {panNumber.toUpperCase()}
+            </span>
+          </div>
+        )}
+
+      </div>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // USER INFO STRIP
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -205,11 +436,10 @@ const UserStrip = ({ user }) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MODAL — Update Payout Status
+// MODAL — Update Payout Status (unchanged)
 // ─────────────────────────────────────────────────────────────────────────────
 
 const UpdateStatusModal = ({ payout, onClose }) => {
-  // `loading` here is the payoutLoading map — check .action, not the whole object
   const { updateStatus, loading } = usePayouts();
   const allowed = TRANSITIONS[payout?.status] ?? [];
 
@@ -228,8 +458,6 @@ const UpdateStatusModal = ({ payout, onClose }) => {
       toast.warn('Failure reason is required when marking as failed');
       return;
     }
-    // updateStatus returns null on failure — the interceptor already toasted
-    // the error, so we only close on success (truthy return value)
     const ok = await updateStatus(payout._id, {
       status:         form.status,
       transactionRef: form.transactionRef || undefined,
@@ -252,6 +480,12 @@ const UpdateStatusModal = ({ payout, onClose }) => {
         <div className="rp-modal__body">
           <UserStrip user={payout.user} />
           <BreakdownCard breakdown={payout.breakdown} totalAmountINR={payout.totalAmountINR} />
+
+          {/* Bank details snapshot — stored on the Payout document at creation time */}
+          <BankDetailsCard
+            bankDetails={payout.bankDetails ?? payout.user?.bankDetails}
+            title="Recipient Bank Details"
+          />
 
           {payout.status === 'paid' || allowed.length === 0 ? (
             <div className="rp-warn-banner">
@@ -282,9 +516,7 @@ const UpdateStatusModal = ({ payout, onClose }) => {
 
               {form.status === 'failed' && (
                 <div className="rp-field">
-                  <label>
-                    Failure Reason <span style={{ color: '#ef4444' }}>*</span>
-                  </label>
+                  <label>Failure Reason <span style={{ color: '#ef4444' }}>*</span></label>
                   <textarea
                     value={form.failureReason}
                     onChange={e => setField('failureReason', e.target.value)}
@@ -319,7 +551,7 @@ const UpdateStatusModal = ({ payout, onClose }) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MODAL — Process single pending claim
+// MODAL — Process single pending claim (unchanged)
 // ─────────────────────────────────────────────────────────────────────────────
 
 const ProcessClaimModal = ({ claim, onClose }) => {
@@ -333,8 +565,6 @@ const ProcessClaimModal = ({ claim, onClose }) => {
   const setField = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
   const handleSubmit = async () => {
-    // processPayout returns null on failure; the interceptor has already
-    // shown the error toast — we only close the modal on success
     const ok = await processPayout({
       claimId:        claim._id,
       status:         form.status,
@@ -357,7 +587,6 @@ const ProcessClaimModal = ({ claim, onClose }) => {
         <div className="rp-modal__body">
           <UserStrip user={claim.user} />
 
-          {/* Risk / readiness warnings */}
           {!claim.hasBankDetails && (
             <div className="rp-warn-banner">⚠️ User has no bank details on file.</div>
           )}
@@ -370,12 +599,19 @@ const ProcessClaimModal = ({ claim, onClose }) => {
             </div>
           )}
 
-          {/* Claim metadata */}
+          {/* Live bank details from user profile — where the payout will be sent */}
+          {claim.hasBankDetails && claim.user?.bankDetails && (
+            <BankDetailsCard
+              bankDetails={claim.user.bankDetails}
+              title="Transfer To (User Bank Details)"
+            />
+          )}
+
           <div className="rp-breakdown">
             <div className="rp-breakdown__row">
               <span className="rp-breakdown__label">Reward Type</span>
               <span className="rp-breakdown__val" style={{ textTransform: 'capitalize' }}>
-                {claim.type}
+                {claim.type === 'grocery_redeem' ? '🛒 Grocery Redemption' : claim.type}
               </span>
             </div>
             <div className="rp-breakdown__row">
@@ -438,7 +674,7 @@ const ProcessClaimModal = ({ claim, onClose }) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MODAL — Bulk process results
+// MODAL — Bulk process results (unchanged)
 // ─────────────────────────────────────────────────────────────────────────────
 
 const BulkResultModal = ({ result, onClose }) => {
@@ -498,13 +734,12 @@ const BulkResultModal = ({ result, onClose }) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TAB 1 — Summary
+// TAB 1 — Summary (unchanged)
 // ─────────────────────────────────────────────────────────────────────────────
 
 const SummaryTab = () => {
   const { summary, recentPaid, loading } = usePayouts();
 
-  // Skeleton while fetching
   if (loading.summary && !summary) {
     return (
       <div className="rp-kpi-grid">
@@ -572,7 +807,6 @@ const SummaryTab = () => {
 
   return (
     <div className="rp-root">
-      {/* KPI strip */}
       <div className="rp-kpi-grid">
         {kpis.map(k => (
           <div key={k.label} className="rp-kpi-card" style={{ '--kpi-color': k.color }}>
@@ -583,7 +817,6 @@ const SummaryTab = () => {
         ))}
       </div>
 
-      {/* Charts */}
       <div className="rp-chart-row">
         {typeData.length > 0 && (
           <Card>
@@ -624,7 +857,6 @@ const SummaryTab = () => {
         )}
       </div>
 
-      {/* Recent paid feed */}
       {recentPaid.length > 0 && (
         <Card>
           <div className="rp-section-title">Recently Paid</div>
@@ -647,7 +879,7 @@ const SummaryTab = () => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TAB 2 — All Payouts
+// TAB 2 — All Payouts (unchanged except grocery_redeem now shows in TYPE_OPTIONS)
 // ─────────────────────────────────────────────────────────────────────────────
 
 const PayoutsTab = () => {
@@ -657,7 +889,6 @@ const PayoutsTab = () => {
     loading,
   } = usePayouts();
 
-  // Payout selected for the UpdateStatus modal
   const [selected, setSelected] = useState(null);
 
   const columns = [
@@ -680,19 +911,19 @@ const PayoutsTab = () => {
     },
     {
       key: 'rewardType', label: 'Type',
-      render: r => (
-        <Badge
-          color={
-            r.rewardType === 'post'
-              ? 'blue'
-              : r.rewardType === 'referral'
-                ? 'green'
-                : 'yellow'
-          }
-        >
-          {r.rewardType}
-        </Badge>
-      ),
+      render: r => {
+        const colorMap = {
+          post:          'blue',
+          referral:      'green',
+          streak:        'yellow',
+          grocery_redeem:'purple',
+        };
+        return (
+          <Badge color={colorMap[r.rewardType] || 'default'}>
+            {r.rewardType === 'grocery_redeem' ? '🛒 Grocery' : r.rewardType}
+          </Badge>
+        );
+      },
     },
     { key: 'milestone', label: 'Milestone' },
     {
@@ -718,6 +949,58 @@ const PayoutsTab = () => {
         : <span style={{ color: 'var(--text-secondary)' }}>—</span>,
     },
     {
+      key: 'bankDetails', label: 'Bank Details',
+      render: r => {
+        const bd = r.bankDetails ?? r.user?.bankDetails;
+        if (!bd?.accountNumber && !bd?.ifscCode) {
+          return <span style={{ color: 'var(--text-secondary)', fontSize: '.8rem' }}>—</span>;
+        }
+        const bankName = bankNameFromIFSC(bd.ifscCode);
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '.15rem', minWidth: 160 }}>
+            {bankName && (
+              <span style={{
+                fontSize: '.72rem', fontWeight: 700,
+                color: '#4f46e5', textTransform: 'uppercase', letterSpacing: '.04em',
+              }}>
+                {bankName}
+              </span>
+            )}
+            {bd.accountNumber && (
+              <span style={{
+                fontFamily: '"DM Mono", monospace',
+                fontSize: '.8rem', letterSpacing: '.05em',
+                color: 'var(--text-primary)', fontWeight: 600,
+                userSelect: 'all',
+              }}>
+                {bd.accountNumber}
+              </span>
+            )}
+            {bd.ifscCode && (
+              <span style={{
+                fontFamily: '"DM Mono", monospace',
+                fontSize: '.72rem', color: 'var(--text-secondary)',
+                letterSpacing: '.05em',
+                userSelect: 'all',
+              }}>
+                {bd.ifscCode.toUpperCase()}
+              </span>
+            )}
+            {bd.panNumber && (
+              <span style={{
+                fontFamily: '"DM Mono", monospace',
+                fontSize: '.7rem', color: 'var(--text-secondary)',
+                letterSpacing: '.06em',
+                userSelect: 'all',
+              }}>
+                PAN: {bd.panNumber.toUpperCase()}
+              </span>
+            )}
+          </div>
+        );
+      },
+    },
+    {
       key: 'createdAt', label: 'Created',
       render: r => <span style={{ fontSize: '.8rem' }}>{formatDate(r.createdAt)}</span>,
     },
@@ -738,20 +1021,28 @@ const PayoutsTab = () => {
     },
   ];
 
-  // Flatten payouts for export — same shape as AdminFinancial's pattern
-  const exportRows = payouts.map(r => ({
-    Name:          r.user?.name || '',
-    Email:         r.user?.email || '',
-    Type:          r.rewardType || '',
-    Milestone:     r.milestone || '',
-    Plan:          r.planKey || '',
-    'Amount (₹)':  r.totalAmountINR ?? 0,
-    Status:        r.status || '',
-    'Txn Ref':     r.transactionRef || '',
-    Created:       formatDate(r.createdAt),
-    'Paid At':     formatDate(r.paidAt),
-    Notes:         r.notes || '',
-  }));
+  const exportRows = payouts.map(r => {
+    const bd = r.bankDetails ?? r.user?.bankDetails;
+    return {
+      Name:            r.user?.name || '',
+      Email:           r.user?.email || '',
+      Phone:           r.user?.phone || '',
+      Type:            r.rewardType || '',
+      Milestone:       r.milestone || '',
+      Plan:            r.planKey || '',
+      'Amount (₹)':    r.totalAmountINR ?? 0,
+      'Cash (₹)':      r.cashAmountINR ?? r.totalAmountINR ?? 0,
+      Status:          r.status || '',
+      'Txn Ref':       r.transactionRef || '',
+      'Bank Name':     bankNameFromIFSC(bd?.ifscCode) || '',
+      'Account No.':   bd?.accountNumber || '',
+      'IFSC Code':     bd?.ifscCode || '',
+      'PAN Number':    bd?.panNumber || '',
+      Created:         formatDate(r.createdAt),
+      'Paid At':       formatDate(r.paidAt),
+      Notes:           r.notes || '',
+    };
+  });
 
   return (
     <>
@@ -806,6 +1097,7 @@ const PayoutsTab = () => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TAB 3 — Pending Claims
+// Now includes grocery_redeem in the type filter.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const PendingClaimsTab = () => {
@@ -815,10 +1107,10 @@ const PendingClaimsTab = () => {
     loading, bulkProcess,
   } = usePayouts();
 
-  const [selected,   setSelected]   = useState(null);  // claim for ProcessClaimModal
-  const [checkedIds, setCheckedIds] = useState([]);    // bulk select
+  const [selected,   setSelected]   = useState(null);
+  const [checkedIds, setCheckedIds] = useState([]);
   const [bulkStatus, setBulkStatus] = useState('processing');
-  const [bulkResult, setBulkResult] = useState(null);  // BulkResultModal data
+  const [bulkResult, setBulkResult] = useState(null);
 
   const allIds     = pendingClaims.map(c => String(c._id));
   const allChecked = allIds.length > 0 && checkedIds.length === allIds.length;
@@ -830,7 +1122,6 @@ const PendingClaimsTab = () => {
     );
 
   const handleBulk = async () => {
-    // bulkProcess returns null on failure; interceptor has already toasted
     const result = await bulkProcess(checkedIds, { status: bulkStatus });
     if (result) {
       setCheckedIds([]);
@@ -877,19 +1168,19 @@ const PendingClaimsTab = () => {
     },
     {
       key: 'type', label: 'Type',
-      render: r => (
-        <Badge
-          color={
-            r.type === 'post'
-              ? 'blue'
-              : r.type === 'referral'
-                ? 'green'
-                : 'yellow'
-          }
-        >
-          {r.type}
-        </Badge>
-      ),
+      render: r => {
+        const colorMap = {
+          post:          'blue',
+          referral:      'green',
+          streak:        'yellow',
+          grocery_redeem:'purple',
+        };
+        return (
+          <Badge color={colorMap[r.type] || 'default'}>
+            {r.type === 'grocery_redeem' ? '🛒 Grocery' : r.type}
+          </Badge>
+        );
+      },
     },
     { key: 'milestone', label: 'Milestone' },
     {
@@ -953,8 +1244,8 @@ const PendingClaimsTab = () => {
   return (
     <>
       <Card>
-        {/* Claim sub-filters */}
         <div className="rp-filter-bar">
+          {/* Updated: TYPE_OPTIONS now includes grocery_redeem */}
           <Select
             value={claimFilters.type}
             onChange={v => setClaimFilters({ type: v })}
@@ -990,7 +1281,6 @@ const PendingClaimsTab = () => {
           <Btn size="sm" variant="secondary" onClick={clearClaimFilters}>Clear</Btn>
         </div>
 
-        {/* Bulk action bar — only visible when items are checked */}
         {checkedIds.length > 0 && (
           <div className="rp-bulk-bar">
             <span className="rp-bulk-bar__count">{checkedIds.length} selected</span>
@@ -1010,22 +1300,11 @@ const PendingClaimsTab = () => {
               <option value="paid">→ Paid (direct)</option>
             </select>
             <div className="rp-bulk-bar__spacer" />
-            <Btn
-              size="sm"
-              variant="secondary"
-              onClick={() => setCheckedIds([])}
-            >
+            <Btn size="sm" variant="secondary" onClick={() => setCheckedIds([])}>
               Deselect All
             </Btn>
-            <Btn
-              size="sm"
-              onClick={handleBulk}
-              disabled={loading.bulk}
-            >
-              {loading.bulk
-                ? 'Processing…'
-                : `Bulk Process (${checkedIds.length})`
-              }
+            <Btn size="sm" onClick={handleBulk} disabled={loading.bulk}>
+              {loading.bulk ? 'Processing…' : `Bulk Process (${checkedIds.length})`}
             </Btn>
           </div>
         )}
@@ -1046,11 +1325,362 @@ const PendingClaimsTab = () => {
       {selected && (
         <ProcessClaimModal claim={selected} onClose={() => setSelected(null)} />
       )}
-
       {bulkResult && (
         <BulkResultModal result={bulkResult} onClose={() => setBulkResult(null)} />
       )}
     </>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TAB 4 — Unredeemed Wallets  (NEW)
+//
+// Shows users who have totalGroceryCoupons > 0 but have NOT submitted a
+// grocery redemption request yet (or whose last redemption was paid/failed
+// and they now have new balance from new slab claims).
+//
+// These users have EARNED grocery coupons through activity slab rewards
+// (post / referral / streak) and the balance is sitting in their wallet
+// waiting for them to click "Redeem".
+//
+// Admin use cases:
+//   • Identify who has large unredeemed balances
+//   • Check who is eligible to self-redeem (KYC + subscription + bank details)
+//   • Filter by eligibility gaps (no bank, KYC not verified) to understand
+//     why certain users haven't redeemed
+//   • Export the list for outreach/nudge campaigns
+// ─────────────────────────────────────────────────────────────────────────────
+
+const UnredeemedWalletsTab = () => {
+  const {
+    unredeemedWallets,
+    walletSummary,
+    walletPagination,
+    walletPage, setWalletPage,
+    walletFilters, setWalletFilters, clearWalletFilters,
+    loading,
+  } = usePayouts();
+
+  // Export rows for CSV/Excel/PDF
+  const exportRows = unredeemedWallets.map(u => ({
+    Name:               u.name || '',
+    Email:              u.email || '',
+    Phone:              u.phone || '',
+    'Balance (₹)':      u.totalGroceryCoupons ?? 0,
+    Shares:             u.totalShares ?? 0,
+    'Referral Tokens':  u.totalReferralToken ?? 0,
+    Plan:               u.plan || 'None',
+    'KYC Status':       u.kycStatus || 'not_started',
+    'Bank Name':        bankNameFromIFSC(u.ifscCode) || '',
+    'Account No.':      u.accountNumber || '',
+    'IFSC Code':        u.ifscCode || '',
+    'PAN Number':       u.panNumber || '',
+    Eligible:           u.eligible ? 'Yes' : 'No',
+    'Rewards Frozen':   u.rewardsFrozen ? 'Yes' : 'No',
+    'Slabs Redeemed':   u.totalSlabsRedeemed ?? 0,
+    'Last Active':      formatDate(u.lastActive),
+  }));
+
+  const columns = [
+    {
+      key: 'user', label: 'User',
+      render: r => (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '.625rem' }}>
+          <div style={{
+            width: 36, height: 36, borderRadius: 9,
+            background: 'linear-gradient(135deg, #4f46e5, #7c3aed)',
+            color: '#fff', display: 'flex', alignItems: 'center',
+            justifyContent: 'center', fontWeight: 700, fontSize: '.875rem',
+            flexShrink: 0,
+          }}>
+            {(r.name?.[0] || 'U').toUpperCase()}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '.1rem' }}>
+            <span style={{ fontWeight: 600, fontSize: '.875rem' }}>
+              {r.name || r.username || '—'}
+            </span>
+            <span style={{ fontSize: '.75rem', color: 'var(--text-secondary)' }}>
+              {r.email}
+            </span>
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: 'totalGroceryCoupons', label: 'Balance',
+      render: r => (
+        <span style={{
+          fontFamily: '"DM Mono", monospace',
+          fontSize: '.9rem', fontWeight: 700,
+          color: r.totalGroceryCoupons >= 2500 ? '#10b981' : 'var(--text-primary)',
+        }}>
+          {fmt(r.totalGroceryCoupons)}
+        </span>
+      ),
+    },
+    {
+      key: 'plan', label: 'Plan',
+      render: r => r.plan
+        ? <Badge color="blue">{r.plan}</Badge>
+        : <Badge color="default">None</Badge>,
+    },
+    {
+      key: 'kycStatus', label: 'KYC',
+      render: r => {
+        const colorMap = { verified: 'green', submitted: 'yellow', rejected: 'red' };
+        return (
+          <Badge color={colorMap[r.kycStatus] || 'default'}>
+            {r.kycStatus?.replace('_', ' ') || 'not started'}
+          </Badge>
+        );
+      },
+    },
+    {
+      key: 'hasBankDetails', label: 'Bank Details',
+      render: r => {
+        if (!r.hasBankDetails) {
+          return (
+            <span style={{ fontSize: '.8rem', color: '#ef4444', fontWeight: 600 }}>
+              ✗ Not set
+            </span>
+          );
+        }
+        const bankName = bankNameFromIFSC(r.ifscCode);
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '.15rem', minWidth: 150 }}>
+            {bankName && (
+              <span style={{
+                fontSize: '.72rem', fontWeight: 700,
+                color: '#4f46e5', textTransform: 'uppercase', letterSpacing: '.04em',
+              }}>
+                {bankName}
+              </span>
+            )}
+            {r.accountNumber && (
+              <span style={{
+                fontFamily: '"DM Mono", monospace',
+                fontSize: '.8rem', fontWeight: 600,
+                color: 'var(--text-primary)', letterSpacing: '.05em',
+                userSelect: 'all',
+              }}>
+                {r.accountNumber}
+              </span>
+            )}
+            {r.ifscCode && (
+              <span style={{
+                fontFamily: '"DM Mono", monospace',
+                fontSize: '.72rem', color: 'var(--text-secondary)',
+                letterSpacing: '.05em',
+                userSelect: 'all',
+              }}>
+                {r.ifscCode.toUpperCase()}
+              </span>
+            )}
+          </div>
+        );
+      },
+    },
+    {
+      key: 'eligible', label: 'Can Self-Redeem',
+      render: r => r.eligible
+        ? (
+          <Badge color="green" style={{ fontSize: '.7rem' }}>
+            ✓ Ready
+          </Badge>
+        )
+        : (
+          // Show WHY they can't self-redeem
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <Badge color="default" style={{ fontSize: '.7rem' }}>Not ready</Badge>
+            {!r.kycVerified && (
+              <span style={{ fontSize: '.65rem', color: '#f59e0b' }}>KYC unverified</span>
+            )}
+            {!r.subActive && (
+              <span style={{ fontSize: '.65rem', color: '#ef4444' }}>No subscription</span>
+            )}
+            {!r.hasBankDetails && (
+              <span style={{ fontSize: '.65rem', color: '#ef4444' }}>No bank details</span>
+            )}
+            {r.rewardsFrozen && (
+              <span style={{ fontSize: '.65rem', color: '#dc2626' }}>🔒 Frozen</span>
+            )}
+          </div>
+        ),
+    },
+    {
+      key: 'totalSlabsRedeemed', label: 'Slabs Claimed',
+      render: r => (
+        <span style={{ fontFamily: '"DM Mono", monospace', fontSize: '.85rem' }}>
+          {r.totalSlabsRedeemed ?? 0}
+        </span>
+      ),
+    },
+    {
+      key: 'lastActive', label: 'Last Active',
+      render: r => (
+        <span style={{ fontSize: '.8rem', color: 'var(--text-secondary)' }}>
+          {formatDate(r.lastActive)}
+        </span>
+      ),
+    },
+  ];
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+
+      {/* ── KPI Strip ── */}
+      {walletSummary && (
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+          gap: '.75rem',
+          marginBottom: '.25rem',
+        }}>
+          {[
+            {
+              label: 'Users with Balance',
+              value: (walletSummary.totalUsersWithBalance ?? 0).toLocaleString(),
+              color: '#4f46e5',
+              icon: '👥',
+            },
+            {
+              label: 'Total Unredeemed',
+              value: fmt(walletSummary.totalUnredeemedINR),
+              color: '#059669',
+              icon: '🛒',
+            },
+            {
+              label: 'Eligible to Redeem',
+              value: (walletSummary.eligibleToRedeem ?? 0).toLocaleString(),
+              color: '#10b981',
+              icon: '✓',
+            },
+            {
+              label: 'Missing Bank Details',
+              value: (walletSummary.missingBankDetails ?? 0).toLocaleString(),
+              color: '#ef4444',
+              icon: '🏦',
+            },
+          ].map(k => (
+            <div key={k.label} style={{
+              background: 'var(--bg-card)',
+              border: '1px solid var(--border)',
+              borderRadius: 12,
+              padding: '1rem 1.125rem',
+              boxShadow: 'var(--shadow-card)',
+              borderTop: `3px solid ${k.color}`,
+            }}>
+              <div style={{ fontSize: '1.2rem', marginBottom: '.375rem' }}>{k.icon}</div>
+              <div style={{
+                fontSize: '1.5rem', fontWeight: 700,
+                fontFamily: '"DM Mono", monospace', letterSpacing: '-.03em',
+                color: 'var(--text-primary)', lineHeight: 1,
+              }}>
+                {k.value}
+              </div>
+              <div style={{
+                fontSize: '.775rem', color: 'var(--text-secondary)',
+                fontWeight: 500, marginTop: '.25rem',
+              }}>
+                {k.label}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Info banner ── */}
+      <div style={{
+        display: 'flex', gap: '.75rem', padding: '.875rem 1rem',
+        background: 'rgba(5,150,105,.06)',
+        border: '1px solid rgba(5,150,105,.18)',
+        borderRadius: 10, fontSize: '.8125rem',
+        color: 'var(--text-primary)', lineHeight: 1.5,
+      }}>
+        <span style={{ fontSize: '1.1rem', flexShrink: 0 }}>ℹ️</span>
+        <span>
+          These users have earned grocery coupons through slab rewards (posts, referrals, streaks)
+          but have <strong>not yet submitted a redemption request</strong>.
+          Users with an active request already in progress appear in <strong>Pending Claims</strong> instead.
+        </span>
+      </div>
+
+      {/* ── Filters ── */}
+      <Card>
+        <div className="rp-filter-bar">
+          <SearchBar
+            value={walletFilters.search}
+            onChange={v => setWalletFilters({ search: v })}
+            placeholder="Search name, email…"
+          />
+          <Select
+            value={walletFilters.kycStatus}
+            onChange={v => setWalletFilters({ kycStatus: v })}
+            options={KYC_STATUS_OPTIONS}
+            placeholder="All KYC Statuses"
+          />
+          <input
+            type="number"
+            min="0"
+            placeholder="Min ₹ balance"
+            value={walletFilters.minBalance}
+            onChange={e => setWalletFilters({ minBalance: e.target.value })}
+            style={{
+              padding: '.375rem .625rem',
+              borderRadius: 7,
+              border: '1px solid var(--border-color)',
+              fontSize: '.85rem',
+              background: 'var(--bg-canvas)',
+              minWidth: 130,
+              color: 'var(--text-primary)',
+            }}
+          />
+          <label style={{
+            display: 'flex', alignItems: 'center', gap: '.375rem',
+            fontSize: '.875rem', cursor: 'pointer', whiteSpace: 'nowrap',
+          }}>
+            <input
+              type="checkbox"
+              checked={!!walletFilters.bankOnly}
+              onChange={e => setWalletFilters({ bankOnly: e.target.checked })}
+            />
+            Bank details only
+          </label>
+          <Btn size="sm" variant="secondary" onClick={clearWalletFilters}>Clear</Btn>
+
+          <div style={{ flex: 1 }} />
+
+          {unredeemedWallets.length > 0 && (
+            <>
+              <Btn size="sm" variant="secondary"
+                onClick={() => exportXLSX(exportRows, 'unredeemed_wallets')}>
+                ↓ Excel
+              </Btn>
+              <Btn size="sm" variant="secondary"
+                onClick={() => exportCSVLocal(exportRows, 'unredeemed_wallets')}>
+                ↓ CSV
+              </Btn>
+              <Btn size="sm" variant="secondary"
+                onClick={() => exportPDFLocal(exportRows, 'Unredeemed Wallets')}>
+                ↓ PDF
+              </Btn>
+            </>
+          )}
+        </div>
+
+        <Table
+          columns={columns}
+          rows={unredeemedWallets}
+          loading={loading.wallets}
+          empty="No users with unredeemed grocery coupon balance found 🎉"
+        />
+        <Pagination
+          page={walletPage}
+          pages={walletPagination.pages}
+          onPage={setWalletPage}
+        />
+      </Card>
+    </div>
   );
 };
 
@@ -1060,13 +1690,15 @@ const PendingClaimsTab = () => {
 
 const RewardPayout = () => {
   const [tab, setTab] = useState('summary');
-  const { claimPagination, pendingClaims, loading, refresh } = usePayouts();
+  const {
+    claimPagination, pendingClaims,
+    walletPagination, unredeemedWallets,
+    loading, refresh,
+  } = usePayouts();
 
-  // Show the unprocessed count on the Pending Claims tab badge.
-  // Use server-reported total (claimPagination.total) when available; fall
-  // back to the length of the current page slice.
-  const pendingCount = claimPagination.total ?? pendingClaims.length;
-  const isBusy = loading.payouts || loading.claims || loading.summary;
+  const pendingCount   = claimPagination.total  ?? pendingClaims.length;
+  const walletCount    = walletPagination.total  ?? unredeemedWallets.length;
+  const isBusy         = loading.payouts || loading.claims || loading.summary || loading.wallets;
 
   return (
     <>
@@ -1096,6 +1728,14 @@ const RewardPayout = () => {
             label: 'Pending Claims',
             badge: pendingCount > 0 ? pendingCount : null,
           },
+          {
+            id: 'wallets',
+            label: 'Unredeemed Wallets',
+            // Show count badge so admins immediately see how many users
+            // are sitting on unredeemed balance
+            badge: walletCount > 0 ? walletCount : null,
+            badgeColor: '#059669',   // green — informational, not urgent
+          },
         ].map(t => (
           <button
             key={t.id}
@@ -1104,7 +1744,10 @@ const RewardPayout = () => {
           >
             {t.label}
             {t.badge != null && (
-              <span className="rp-tab-badge">
+              <span
+                className="rp-tab-badge"
+                style={t.badgeColor ? { background: t.badgeColor } : undefined}
+              >
                 {t.badge > 99 ? '99+' : t.badge}
               </span>
             )}
@@ -1115,6 +1758,7 @@ const RewardPayout = () => {
       {tab === 'summary' && <SummaryTab />}
       {tab === 'payouts' && <PayoutsTab />}
       {tab === 'claims'  && <PendingClaimsTab />}
+      {tab === 'wallets' && <UnredeemedWalletsTab />}
     </>
   );
 };

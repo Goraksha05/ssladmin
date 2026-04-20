@@ -80,6 +80,7 @@ const AdminLayoutInner = () => {
     { id: 'activity-report', path: '/admin/activity-report', icon: '📋', label: 'Activity Report' },
     { id: 'posts', path: '/admin/posts', icon: '🛡️', label: 'Moderation' },
     { id: 'financial', path: '/admin/financial', icon: '💰', label: 'Financial' },
+    { id: 'payouts', path: '/admin/payouts', icon: '🏆', label: 'Reward Payout' },
     { id: 'analytics', path: '/admin/analytics', icon: '📈', label: 'Analytics' },
     { id: 'audit', path: '/admin/audit-logs', icon: '📜', label: 'Audit Logs' },
     { id: 'admins', path: '/admin/admins', icon: '👑', label: 'Admins', },
