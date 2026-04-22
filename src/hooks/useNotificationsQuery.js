@@ -1,13 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
-import axios from "axios";
+import apiRequest from "../utils/apiRequest";
 
 export const useNotificationsQuery = () => {
   return useQuery({
     queryKey: ["notifications"],
     queryFn: async () => {
-      const res = await axios.get("/api/notifications");
+      const res = await apiRequest.get("/api/notifications");
       return res.data;
     },
-    staleTime: 1000 * 30, // 30 sec (recommended)
+    staleTime: 1000 * 30,
   });
 };

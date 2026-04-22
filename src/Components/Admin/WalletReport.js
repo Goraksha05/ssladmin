@@ -174,7 +174,7 @@ const ConfirmPayModal = ({ row, onConfirm, onClose, paying }) => {
         {/* What will be paid */}
         <div style={BREAKDOWN}>
           <div style={BREAKDOWN_ROW}>
-            <span style={{ color: 'var(--text-secondary)', fontSize: '.85rem' }}>Grocery Coupons (cash)</span>
+            <span style={{ color: 'var(--text-secondary)', fontSize: '.85rem' }}>Available Balance (cash)</span>
             <span style={{ fontWeight: 700, color: '#7c3aed', fontSize: '1.1rem' }}>
               {fmtINR(row.groceryCoupons)}
             </span>
@@ -224,7 +224,7 @@ const ConfirmPayModal = ({ row, onConfirm, onClose, paying }) => {
             disabled={paying || row.pendingClaimIds.length === 0}
             style={{ background: '#7c3aed', color: '#fff', border: 'none' }}
           >
-            {paying ? 'Processing…' : `Pay ${fmtINR(row.groceryCoupons)}`}
+            {paying ? 'Processing…' : `Pay Available Balance ${fmtINR(row.groceryCoupons)}`}
           </Btn>
         </div>
       </div>
@@ -345,7 +345,7 @@ const SummaryStrip = ({ rows }) => {
   }), [rows]);
 
   const chips = [
-    { icon: '🛒', label: 'Total Grocery Coupons', val: fmtINR(totals.coupons), color: '#7c3aed', bg: 'rgba(124,58,237,.08)' },
+    { icon: '🛒', label: 'Available Grocery Balance', val: fmtINR(totals.coupons), color: '#7c3aed', bg: 'rgba(124,58,237,.08)' },
     { icon: '📈', label: 'Total Shares',           val: `${fmt(totals.shares)} units`,  color: '#0891b2', bg: 'rgba(8,145,178,.08)' },
     { icon: '🪙', label: 'Total Tokens',            val: fmt(totals.tokens),             color: '#be185d', bg: 'rgba(190,24,93,.08)'  },
     { icon: '💳', label: 'Users Awaiting Pay',      val: fmt(totals.payable),            color: '#10b981', bg: 'rgba(16,185,129,.08)' },
@@ -432,8 +432,17 @@ const WalletReport = () => {
   const handleDownload = useCallback(async () => {
     setExporting(true);
     try {
-      const { rows: exportRows } = await fetchExportData({ search, hasEarnings: hasEarnings ? 'true' : '' });
-      if (!exportRows?.length) { toast.warn('No data to export'); return; }
+      const { rows } = await fetchExportData({ search, hasEarnings: hasEarnings ? 'true' : '' });
+      if (!rows?.length) { toast.warn('No data to export'); return; }
+      
+      const exportRows = rows.map(r => ({
+        'Name':                   r.name,
+        'Email':                  r.email,
+        'Phone':                  r.phone,
+        'Available Balance (₹)':  r.groceryCoupons, // renamed
+        'Shares (units)':         r.shares,
+        'Referral Tokens':        r.referralToken,
+      }));
       doExportExcel(exportRows);
       doExportPDF(exportRows);
     } catch {
@@ -559,7 +568,7 @@ const WalletReport = () => {
                 <tr style={{ background: 'var(--bg-secondary)' }}>
                   {[
                     'User', 'Plan / KYC', 'Bank',
-                    '🛒 Grocery Coupons', '📈 Shares', '🪙 Tokens',
+                    '🛒 Available Balance', '📈 Shares', '🪙 Tokens',
                     'Pending Claims', 'Last Active', 'Action',
                   ].map(h => (
                     <th key={h} style={{
@@ -623,7 +632,7 @@ const WalletReport = () => {
                       <div style={{ fontWeight: 700, color: '#7c3aed', fontSize: '.95rem' }}>
                         {fmtINR(row.groceryCoupons)}
                       </div>
-                      <div style={{ fontSize: '.65rem', color: 'var(--text-secondary)' }}>cash</div>
+                      <div style={{ fontSize: '.65rem', color: 'var(--text-secondary)' }}>available</div>
                     </td>
 
                     {/* Shares — non-cash */}
