@@ -1,44 +1,4 @@
 // components/Admin/AdminTrustDashboard.js
-//
-// CHANGES FROM ORIGINAL:
-//
-//   1. CRITICAL — Wrong auth header key. The original API() helper sent
-//      `'auth-token': token` but the backend auth middleware (fetchUser.js /
-//      verifyAdmin.js) reads the standard `Authorization: Bearer <token>`
-//      header set by apiRequest's request interceptor. Using a custom
-//      `auth-token` header meant every trust API call was unauthorised (401).
-//      Fix: replaced the bespoke fetch() wrapper with apiRequest so the
-//      interceptor handles auth automatically. The old API() function is removed.
-//
-//   2. CRITICAL — localStorage key mismatch. The original read
-//      `localStorage.getItem('authToken')` (capital T) but AuthContext stores
-//      the token under 'authtoken' (lowercase t, matching the backend response
-//      field). This caused the token to always be null in the old helper.
-//      This is now moot since the whole fetch wrapper is replaced by apiRequest,
-//      but documented here for clarity.
-//
-//   3. CRITICAL — Wrong import path for AdminUI.css. Original imported
-//      `'./AdminUI.css'` which does not exist — AdminUI exports a <style> tag
-//      via AdminUIStyles, not a CSS file. Import removed; AdminUIStyles
-//      component rendered instead.
-//
-//   4. FIX — CSS variable names bridged. AdminTrustDashboard used
-//      `--color-background-primary`, `--color-text-primary` etc. (its own
-//      convention) while the rest of the admin panel uses `--bg-card`,
-//      `--text-primary` etc. AdminUI.js now defines alias variables so both
-//      naming conventions resolve to the same values without changing any
-//      inline styles in this file.
-//
-//   5. FIX — All API calls migrated from raw fetch() to apiRequest (axios).
-//      Response shape adjusted: axios wraps the body in `.data`, so all
-//      `data.events`, `data.clusters`, etc. become `res.data.events` etc.
-//
-//   6. FIX — Error handling added to all API calls. The original used
-//      Promise chains with no .catch(), causing unhandled rejections on
-//      network errors. All calls now have try/catch with toast notifications.
-//
-//   7. FIX — AdminUIStyles rendered at the root so CSS variables are
-//      available to all sub-components.
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'react-toastify';

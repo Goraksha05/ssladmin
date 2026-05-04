@@ -21,7 +21,6 @@ import AdminRouteGuard from './Components/AdminRouteGuard';
 // Pages
 import Login from './pages/Login';
 import Home from './pages/Home';
-import KycVerification from './Components/KYC/KycVerification';
 
 // Layout
 import AdminLayout from './Components/AdminLayout';
@@ -124,7 +123,6 @@ function AppRoutes() {
 
             {/* ── User ── */}
             <Route path="/" element={<PrivateRoute><Home /></PrivateRoute>} />
-            <Route path="/kyc" element={<PrivateRoute><KycVerification /></PrivateRoute>} />
 
                 {/* ── Admin ── */}
                 <Route

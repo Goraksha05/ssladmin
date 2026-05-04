@@ -1,24 +1,4 @@
-/**
- * Components/KYC/AdminKycDashboard.js
- *
- * NEW FILE — Full KYC review & approval panel for admins.
- *
- * Backend endpoints consumed:
- *   GET    /api/admin/kyc              → paginated list of all KYC submissions
- *                                        query: ?status=&page=&limit=&search=
- *   GET    /api/admin/kyc/:userId      → full KYC record + OCR data for a user
- *   PATCH  /api/admin/kyc/:userId/verify  → approve KYC   body: { notes? }
- *   PATCH  /api/admin/kyc/:userId/reject  → reject  KYC   body: { reason }
- *   PATCH  /api/admin/kyc/:userId/reset   → reset to not_started (optional)
- *
- * Permission required: view_users  (reads KYC data)
- *                      manage_users or approve_kyc  (approve / reject)
- *
- * Auth: all requests go through apiRequest which attaches the Bearer token
- *       from localStorage automatically via the request interceptor.
- *
- * Design: editorial admin aesthetic — dense data table + slide-in detail drawer.
- */
+/* Components/KYC/AdminKycDashboard.js */
 
 import React, {
   useEffect, useState, useCallback, useRef,
@@ -114,8 +94,8 @@ const RejectModal = ({ userId, userName, onClose, onDone }) => {
     if (!reason.trim()) { toast.warn('Please provide a rejection reason'); return; }
     setSaving(true);
     try {
-      // FIX: /api/kyc/:id/reject (not /api/admin/kyc/:id/reject)
-      await apiRequest.patch(`/api/kyc/${userId}/reject`, { reason: reason.trim() });
+      // POST /api/admin/kyc/reject/:id
+      await apiRequest.post(`/api/admin/kyc/reject/${userId}`, { reason: reason.trim() });
       toast.success(`KYC rejected for ${userName}`);
       onDone();
       onClose();
@@ -174,8 +154,8 @@ const KycDrawer = ({ userId, onClose, onApprove, onReject, canAct }) => {
 
   useEffect(() => {
     setLoading(true);
-    // FIX: correct prefix /api/kyc/:id (not /api/admin/kyc/:id)
-    apiRequest.get(`/api/kyc/${userId}`)
+    // GET /api/admin/kyc/user/:id → returns flat user object: { name, email, username, kyc, trustFlags }
+    apiRequest.get(`/api/admin/kyc/user/${userId}`)
       .then(r => setDetail(r.data))
       .catch(() => toast.error('Failed to load KYC details'))
       .finally(() => setLoading(false));
@@ -184,8 +164,8 @@ const KycDrawer = ({ userId, onClose, onApprove, onReject, canAct }) => {
   const approve = async () => {
     setApproving(true);
     try {
-      // FIX: /api/kyc/:id/verify (not /api/admin/kyc/:id/verify)
-      await apiRequest.patch(`/api/kyc/${userId}/verify`, { notes: notes || undefined });
+      // POST /api/admin/kyc/approve/:id
+      await apiRequest.post(`/api/admin/kyc/approve/${userId}`, { notes: notes || undefined });
       toast.success('KYC approved successfully');
       onApprove();
       onClose();
@@ -196,10 +176,12 @@ const KycDrawer = ({ userId, onClose, onApprove, onReject, canAct }) => {
     }
   };
 
-  const kyc = detail?.kyc;
-  const user = detail?.user;
-  const ocr = kyc?.ocrData || {};
+  // getKYCDetail returns a flat user object — kyc is a sub-document on it, not nested under .user
+  const kyc  = detail?.kyc;
+  const user = detail; // the response IS the user object
+  const ocr    = kyc?.ocrData    || {};
   const thumbs = kyc?.thumbnails || {};
+  const docs   = kyc?.documents  || {};
   const status = kyc?.status || 'not_started';
   const meta = STATUS_META[status] || STATUS_META.not_started;
 
@@ -275,14 +257,22 @@ const KycDrawer = ({ userId, onClose, onApprove, onReject, canAct }) => {
             </div>
           )}
 
-          {/* Document thumbnails */}
-          {Object.keys(thumbs).length > 0 && (
+          {/* Document thumbnails + full-res documents */}
+          {(Object.keys(thumbs).length > 0 || Object.keys(docs).length > 0) && (
             <div className="kyc-section">
               <div className="kyc-section-title">Document Images</div>
               <div className="kyc-thumbs-grid">
-                {Object.entries(thumbs).map(([k, url]) => (
-                  <DocThumb key={k} url={url} label={k.replace(/([A-Z])/g, ' $1').trim()} />
-                ))}
+                {/* Prefer full-res document URLs; fall back to thumbnails */}
+                {Object.keys({ ...docs, ...thumbs })
+                  .filter((k, i, arr) => arr.indexOf(k) === i)
+                  .map(k => (
+                    <DocThumb
+                      key={k}
+                      url={docs[k]?.url || docs[k] || thumbs[k]}
+                      label={k.replace(/([A-Z])/g, ' $1').trim()}
+                    />
+                  ))
+                }
               </div>
             </div>
           )}
@@ -292,12 +282,11 @@ const KycDrawer = ({ userId, onClose, onApprove, onReject, canAct }) => {
             <div className="kyc-section-title">User Account</div>
             <div className="kyc-info-grid">
               {[
-                ['Name', user?.name],
-                ['Email', user?.email],
-                ['Phone', user?.phone],
-                ['Plan', user?.subscription?.plan || 'None'],
-                ['Sub Active', user?.subscription?.active ? 'Yes' : 'No'],
-                ['Account Created', fmtDate(user?.date)],
+                ['Name',        user?.name],
+                ['Email',       user?.email],
+                ['Username',    user?.username],
+                ['Risk Tier',   user?.trustFlags?.riskTier],
+                ['KYC Required',user?.trustFlags?.kycRequired ? 'Yes' : 'No'],
               ].map(([k, v]) => (
                 <div key={k} className="kyc-info-row">
                   <span className="kyc-info-key">{k}</span>
@@ -385,11 +374,15 @@ const AdminKycDashboard = () => {
         ...(status && { status }),
         ...(search && { search }),
       });
-      // FIX: correct prefix is /api/kyc (mounted in index.js as app.use('/api/kyc', ...))
-      // NOT /api/admin/kyc — that path is never registered on the backend.
-      const res = await apiRequest.get(`/api/kyc?${params}`);
+      // GET /api/admin/kyc/users — paginated list
+      const res = await apiRequest.get(`/api/admin/kyc/users?${params}`);
       setRecords(res.data.users || res.data.records || []);
-      setPagination(res.data.pagination || { page: p, pages: 1, total: res.data.total || 0 });
+      // Controller returns flat { users, total, page, pages } — no pagination wrapper
+      setPagination(res.data.pagination || {
+        page:  res.data.page  || p,
+        pages: res.data.pages || 1,
+        total: res.data.total || 0,
+      });
     } catch {
       toast.error('Failed to load KYC records');
     } finally {
@@ -400,8 +393,8 @@ const AdminKycDashboard = () => {
   const fetchStats = useCallback(async () => {
     if (!canView) return;
     try {
-      // FIX: correct prefix /api/kyc/stats (not /api/admin/kyc/stats)
-      const res = await apiRequest.get('/api/kyc/stats');
+      // GET /api/admin/kyc/stats
+      const res = await apiRequest.get('/api/admin/kyc/stats');
       setStats(res.data);
     } catch {
       // Stats are non-critical — fail silently
@@ -495,8 +488,8 @@ const AdminKycDashboard = () => {
               <>
                 <Btn size="sm" variant="success" onClick={async () => {
                   try {
-                    // FIX: /api/kyc/:id/verify (not /api/admin/kyc/:id/verify)
-                    await apiRequest.patch(`/api/kyc/${uid}/verify`);
+                    // POST /api/admin/kyc/approve/:id
+                    await apiRequest.post(`/api/admin/kyc/approve/${uid}`);
                     toast.success('KYC approved');
                     handleApproved();
                   } catch (e) {
